@@ -1,0 +1,975 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Calculadora de Amortización</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f5f4f0;
+  --surface: #ffffff;
+  --surface2: #f0efe9;
+  --border: #e2e0d8;
+  --border2: #ccc9bc;
+  --text: #1a1917;
+  --text2: #5a5850;
+  --text3: #9a9688;
+  --accent: #2d6a4f;
+  --accent-light: #e8f4ee;
+  --accent2: #1e4d3a;
+  --warn: #b5590e;
+  --warn-light: #fef3ea;
+  --info: #1a5276;
+  --info-light: #eaf2f8;
+  --red: #8b2a2a;
+  --red-light: #fdf0f0;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.5; }
+
+/* ── LAYOUT ── */
+.app { max-width: 900px; margin: 0 auto; padding: 24px 16px 60px; }
+header { margin-bottom: 28px; }
+header h1 { font-size: 22px; font-weight: 600; color: var(--text); letter-spacing: -0.3px; }
+header p { font-size: 13px; color: var(--text2); margin-top: 4px; }
+
+/* ── STEPS ── */
+.steps { display: flex; gap: 0; margin-bottom: 28px; }
+.step { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 500; color: var(--text3); padding: 0 12px 0 0; cursor: pointer; transition: color .2s; }
+.step:first-child { padding-left: 0; }
+.step-num { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--border2); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; background: var(--surface); transition: all .2s; flex-shrink: 0; }
+.step.active { color: var(--accent); }
+.step.active .step-num { background: var(--accent); color: white; border-color: var(--accent); }
+.step.done { color: var(--text2); }
+.step.done .step-num { background: var(--surface2); border-color: var(--border2); color: var(--text2); }
+.step-sep { flex: 1; height: 1px; background: var(--border); margin: 0 4px; align-self: center; }
+
+/* ── CARD ── */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 22px; box-shadow: var(--shadow); margin-bottom: 16px; }
+.card-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 16px; padding-bottom: 10px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+.card-title span { background: var(--accent-light); color: var(--accent); border-radius: 50%; width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex-shrink: 0; }
+
+/* ── FORM ── */
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.form-grid.three { grid-template-columns: 1fr 1fr 1fr; }
+.form-grid.one { grid-template-columns: 1fr; }
+.field { display: flex; flex-direction: column; gap: 5px; }
+.field label { font-size: 12px; font-weight: 500; color: var(--text2); }
+.field .hint { font-size: 11px; color: var(--text3); margin-top: 2px; }
+.field input, .field select {
+  height: 38px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 0 11px; font-size: 13px; font-family: inherit; color: var(--text);
+  background: var(--surface); transition: border-color .15s, box-shadow .15s;
+  outline: none; appearance: none;
+}
+.field input:focus, .field select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(45,106,79,0.1); }
+.field input.error { border-color: var(--red); }
+.field select { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%239a9688' fill='none' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 11px center; padding-right: 30px; cursor: pointer; }
+.field-prefix { position: relative; }
+.field-prefix .prefix { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); font-size: 12px; color: var(--text3); pointer-events: none; font-family: 'DM Mono', monospace; }
+.field-prefix input { padding-left: 36px; font-family: 'DM Mono', monospace; }
+
+/* ── RADIO OPTIONS ── */
+.options-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.options-grid.four { grid-template-columns: 1fr 1fr; }
+.option-card { border: 1.5px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; cursor: pointer; transition: all .15s; user-select: none; }
+.option-card:hover { border-color: var(--accent); background: var(--accent-light); }
+.option-card.selected { border-color: var(--accent); background: var(--accent-light); }
+.option-card input[type=radio] { display: none; }
+.option-label { font-size: 13px; font-weight: 500; color: var(--text); display: flex; align-items: center; gap: 8px; }
+.option-label::before { content: ''; width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--border2); flex-shrink: 0; transition: all .15s; }
+.option-card.selected .option-label::before { border-color: var(--accent); background: var(--accent); box-shadow: inset 0 0 0 3px var(--accent-light); }
+.option-desc { font-size: 11px; color: var(--text3); margin-top: 4px; margin-left: 22px; line-height: 1.5; }
+.option-card.selected .option-desc { color: var(--accent2); }
+
+/* ── BUTTONS ── */
+.btn { height: 40px; padding: 0 20px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer; transition: all .15s; border: none; display: inline-flex; align-items: center; gap: 8px; }
+.btn-primary { background: var(--accent); color: white; }
+.btn-primary:hover { background: var(--accent2); }
+.btn-primary:active { transform: scale(0.98); }
+.btn-secondary { background: var(--surface); color: var(--text2); border: 1px solid var(--border); }
+.btn-secondary:hover { border-color: var(--border2); background: var(--surface2); }
+.btn-row { display: flex; gap: 10px; margin-top: 20px; justify-content: flex-end; }
+
+/* ── MIXTO SLIDERS ── */
+.mixto-section { margin-top: 14px; padding: 14px; background: var(--surface2); border-radius: var(--radius-sm); border: 1px solid var(--border); }
+.slider-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.slider-row label { font-size: 12px; color: var(--text2); min-width: 80px; }
+.slider-row input[type=range] { flex: 1; accent-color: var(--accent); cursor: pointer; }
+.slider-val { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--accent); font-weight: 500; min-width: 90px; text-align: right; }
+.slider-total { font-size: 12px; color: var(--text3); margin-top: 4px; }
+.slider-total.ok { color: var(--accent); }
+.slider-total.warn { color: var(--warn); }
+
+/* ── PREFERENCE SECTION ── */
+.pref-section { margin-top: 14px; }
+.pref-row { display: flex; gap: 8px; }
+.pref-btn { flex: 1; padding: 10px 8px; border: 1.5px solid var(--border); border-radius: var(--radius-sm); font-size: 12px; font-weight: 500; color: var(--text2); background: var(--surface); cursor: pointer; text-align: center; transition: all .15s; font-family: inherit; }
+.pref-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.pref-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-light); font-weight: 600; }
+.pref-sub { font-size: 10px; font-weight: 400; display: block; margin-top: 2px; opacity: 0.8; }
+
+/* ── RESULTS ── */
+.results-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+.metric { background: var(--surface2); border-radius: var(--radius-sm); padding: 14px 14px 12px; border: 1px solid var(--border); }
+.metric .m-label { font-size: 11px; color: var(--text3); margin-bottom: 6px; font-weight: 500; }
+.metric .m-val { font-size: 18px; font-weight: 600; color: var(--text); font-family: 'DM Mono', monospace; line-height: 1; }
+.metric .m-val.green { color: var(--accent); }
+.metric .m-val.amber { color: var(--warn); }
+.metric .m-sub { font-size: 11px; color: var(--text3); margin-top: 4px; }
+.metric.highlight { background: var(--accent-light); border-color: rgba(45,106,79,0.2); }
+.metric.highlight .m-label { color: var(--accent2); }
+
+.compare-bar { margin: 16px 0; }
+.bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.bar-label { font-size: 11px; color: var(--text2); width: 110px; flex-shrink: 0; text-align: right; }
+.bar-track { flex: 1; height: 8px; background: var(--border); border-radius: 4px; overflow: visible; position: relative; }
+.bar-fill { height: 100%; border-radius: 4px; transition: width .6s ease; }
+.bar-fill.green { background: var(--accent); }
+.bar-fill.blue { background: var(--info); }
+.bar-val { font-size: 11px; font-family: 'DM Mono', monospace; color: var(--text2); width: 90px; flex-shrink: 0; }
+
+/* ── CRONOGRAMA ── */
+.crono-wrap { overflow-x: auto; margin-top: 12px; }
+.crono-table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 580px; }
+.crono-table th { background: var(--surface2); font-weight: 600; font-size: 11px; color: var(--text2); padding: 8px 10px; text-align: right; border-bottom: 1.5px solid var(--border); white-space: nowrap; position: sticky; top: 0; z-index: 1; }
+.crono-table th:first-child { text-align: center; }
+.crono-table td { padding: 6px 10px; text-align: right; border-bottom: 1px solid var(--border); font-family: 'DM Mono', monospace; font-size: 11.5px; }
+.crono-table td:first-child { text-align: center; font-family: 'DM Sans', sans-serif; font-weight: 500; color: var(--text2); font-size: 11px; }
+.crono-table tr:nth-child(even) td { background: var(--surface2); }
+.crono-table tr:hover td { background: var(--accent-light); }
+.crono-table tr.amort-row td { background: #fffbe6; font-weight: 500; color: var(--warn); }
+.crono-table tr.amort-row:hover td { background: #fff3cd; }
+.crono-table td.green { color: var(--accent); font-weight: 500; }
+.crono-table tfoot td { font-weight: 600; font-size: 12px; background: var(--surface2); border-top: 1.5px solid var(--border); border-bottom: none; color: var(--text); }
+.crono-scroll { max-height: 420px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+
+/* ── ALERTS ── */
+.alert { padding: 11px 14px; border-radius: var(--radius-sm); font-size: 12px; line-height: 1.6; margin-bottom: 12px; }
+.alert.info { background: var(--info-light); color: var(--info); border: 1px solid rgba(26,82,118,0.15); }
+.alert.warn { background: var(--warn-light); color: var(--warn); border: 1px solid rgba(181,89,14,0.15); }
+.alert.success { background: var(--accent-light); color: var(--accent2); border: 1px solid rgba(45,106,79,0.2); }
+
+/* ── TABS ── */
+.tab-bar { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+.tab-btn { padding: 9px 16px; font-size: 13px; font-weight: 500; color: var(--text3); border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all .15s; font-family: inherit; }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* ── SCORE DISPLAY ── */
+.score-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--surface2); border-radius: var(--radius-sm); margin-top: 8px; }
+.score-num { font-family: 'DM Mono', monospace; font-size: 22px; font-weight: 500; color: var(--accent); }
+.score-text { font-size: 12px; color: var(--text2); line-height: 1.5; }
+
+/* ── HIDDEN / VISIBLE ── */
+.hidden { display: none !important; }
+.section { display: none; }
+.section.active { display: block; }
+
+/* ── RESPONSIVE ── */
+@media (max-width: 600px) {
+  .form-grid, .form-grid.three { grid-template-columns: 1fr; }
+  .options-grid, .options-grid.four { grid-template-columns: 1fr; }
+  .results-grid { grid-template-columns: 1fr 1fr; }
+  .pref-row { flex-wrap: wrap; }
+}
+@media (max-width: 400px) {
+  .results-grid { grid-template-columns: 1fr; }
+}
+
+.tag { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 10px; text-transform: uppercase; letter-spacing: .03em; }
+.tag.green { background: var(--accent-light); color: var(--accent); }
+.tag.amber { background: var(--warn-light); color: var(--warn); }
+.tag.blue  { background: var(--info-light);  color: var(--info); }
+.divider { height: 1px; background: var(--border); margin: 16px 0; }
+.mono { font-family: 'DM Mono', monospace; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <h1>Calculadora de Amortización</h1>
+    <p>Sistema francés · Amortización extraordinaria · Optimizador de cuota y plazo</p>
+  </header>
+
+  <!-- STEPS -->
+  <div class="steps" id="steps">
+    <div class="step active" id="step1" onclick="goStep(1)"><div class="step-num">1</div> Datos del préstamo</div>
+    <div class="step-sep"></div>
+    <div class="step" id="step2" onclick="goStep(2)"><div class="step-num">2</div> Amortización</div>
+    <div class="step-sep"></div>
+    <div class="step" id="step3" onclick="goStep(3)"><div class="step-num">3</div> Resultados</div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════ SECCIÓN 1 -->
+  <div class="section active" id="sec1">
+    <div class="card">
+      <div class="card-title"><span>1</span> Datos del préstamo</div>
+      <div class="form-grid three" style="margin-bottom:14px">
+        <div class="field">
+          <label>Moneda / Currency</label>
+          <select id="currency">
+            <option value="S/ ">PEN — Soles (S/)</option>
+            <option value="$ ">USD — Dólares ($)</option>
+            <option value="€ ">EUR — Euros (€)</option>
+            <option value="£ ">GBP — Libras (£)</option>
+            <option value="MXN ">MXN — Pesos MX</option>
+            <option value="COP ">COP — Pesos CO</option>
+            <option value="CLP ">CLP — Pesos CL</option>
+            <option value="ARS ">ARS — Pesos AR</option>
+          </select>
+        </div>
+        <div class="field field-prefix">
+          <label>Capital original del préstamo</label>
+          <span class="prefix" id="pfx1">S/</span>
+          <input type="number" id="capital" placeholder="133840" min="1" step="0.01">
+          <div class="hint">Monto total prestado por el banco</div>
+        </div>
+        <div class="field">
+          <label>Plazo original (meses)</label>
+          <input type="number" id="plazo" placeholder="68" min="1" max="600">
+        </div>
+      </div>
+      <div class="form-grid three" style="margin-bottom:14px">
+        <div class="field">
+          <label>TEA — Tasa Efectiva Anual (%)</label>
+          <input type="number" id="tea" placeholder="9.90" min="0.01" max="200" step="0.01">
+          <div class="hint">Ej: 9.90 para 9.90%</div>
+        </div>
+        <div class="field field-prefix">
+          <label>Cuota mensual (con seguro)</label>
+          <span class="prefix" id="pfx2">S/</span>
+          <input type="number" id="cuota_total" placeholder="2686.73" min="1" step="0.01">
+          <div class="hint">Cuota que pagas al banco (incluye seguro)</div>
+        </div>
+        <div class="field field-prefix">
+          <label>Total seguro desgravamen</label>
+          <span class="prefix" id="pfx3">S/</span>
+          <input type="number" id="seguro_total" placeholder="6083" min="0" step="0.01">
+          <div class="hint">Suma total de seguro en todo el cronograma. Si no tienes, pon 0.</div>
+        </div>
+      </div>
+      <div class="form-grid" style="margin-bottom:14px">
+        <div class="field field-prefix">
+          <label>Total intereses del cronograma original</label>
+          <span class="prefix" id="pfx4">S/</span>
+          <input type="number" id="intereses_orig" placeholder="41814.48" min="0" step="0.01">
+          <div class="hint">Suma total de intereses según el cronograma del banco</div>
+        </div>
+        <div class="field">
+          <label>Cuota número donde se aplica la amortización</label>
+          <input type="number" id="cuota_desde" placeholder="1" min="1">
+          <div class="hint">Después de pagar la cuota N, se aplica la amortización. Ej: 1 = tras la primera cuota.</div>
+        </div>
+      </div>
+      <div id="calc-preview" class="alert info hidden"></div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="validateStep1()">Continuar →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════ SECCIÓN 2 -->
+  <div class="section" id="sec2">
+    <div class="card">
+      <div class="card-title"><span>2</span> Tipo y monto de amortización</div>
+
+      <div class="field field-prefix" style="max-width:320px; margin-bottom:18px">
+        <label>Monto total a amortizar (Z)</label>
+        <span class="prefix" id="pfx5">S/</span>
+        <input type="number" id="monto_Z" placeholder="36000" min="1" step="100" oninput="onZChange()">
+        <div class="hint">Monto extraordinario disponible para amortizar. Operación gratuita.</div>
+      </div>
+
+      <div style="margin-bottom:6px"><label style="font-size:12px;font-weight:500;color:var(--text2)">Tipo de amortización</label></div>
+      <div class="options-grid four" id="tipo-options">
+        <label class="option-card selected" id="opt-tiempo">
+          <input type="radio" name="tipo" value="tiempo" checked>
+          <div class="option-label">Todo a reducir tiempo</div>
+          <div class="option-desc">Cuota inamovible. Máximo ahorro en intereses. Elimina los meses finales.</div>
+        </label>
+        <label class="option-card" id="opt-cuota">
+          <input type="radio" name="tipo" value="cuota">
+          <div class="option-label">Todo a reducir cuota</div>
+          <div class="option-desc">Plazo igual. La cuota mensual baja considerablemente. Menor ahorro total.</div>
+        </label>
+        <label class="option-card" id="opt-mixto-a">
+          <input type="radio" name="tipo" value="mixto_cuota_tiempo">
+          <div class="option-label">Mixto: cuota → tiempo <span class="tag green" style="margin-left:4px">Recomendado</span></div>
+          <div class="option-desc">Primero reduce cuota, luego reduce tiempo. Mayor ahorro total en modo mixto.</div>
+        </label>
+        <label class="option-card" id="opt-mixto-b">
+          <input type="radio" name="tipo" value="mixto_tiempo_cuota">
+          <div class="option-label">Mixto: tiempo → cuota</div>
+          <div class="option-desc">Primero reduce tiempo, luego reduce cuota. Mayor reducción de cuota en modo mixto.</div>
+        </label>
+      </div>
+
+      <!-- MIXTO CONTROLS -->
+      <div class="mixto-section hidden" id="mixto-controls">
+        <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:12px">Distribución del monto Z</div>
+        <div class="slider-row">
+          <label id="sl-label-x">Reduce tiempo (X)</label>
+          <input type="range" id="slider-x" min="0" max="36000" step="500" value="12000" oninput="onSliderX()">
+          <span class="slider-val" id="sv-x">S/ 12,000</span>
+        </div>
+        <div class="slider-row">
+          <label id="sl-label-y">Reduce cuota (Y)</label>
+          <input type="range" id="slider-y" min="0" max="36000" step="500" value="24000" oninput="onSliderY()">
+          <span class="slider-val" id="sv-y">S/ 24,000</span>
+        </div>
+        <div class="slider-total" id="sl-total">Total: S/ 36,000 ✓</div>
+
+        <!-- PREFERENCIA -->
+        <div class="divider"></div>
+        <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:8px">¿O prefieres que calculemos el óptimo automáticamente?</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:10px">Elige tu preferencia y presiona "Calcular óptimo"</div>
+        <div class="pref-row" id="pref-row">
+          <button class="pref-btn" id="pref-ahorro" onclick="setPref('ahorro')">Maximizar ahorro<span class="pref-sub">Menor gasto total</span></button>
+          <button class="pref-btn active" id="pref-equilibrio" onclick="setPref('equilibrio')">Equilibrio<span class="pref-sub">Ahorro + cuota baja</span></button>
+          <button class="pref-btn" id="pref-cuota" onclick="setPref('cuota')">Bajar cuota máx.<span class="pref-sub">Mayor alivio mensual</span></button>
+        </div>
+        <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
+          <div class="field" style="flex:1; margin:0;">
+            <label style="font-size:11px">Bajada mínima de cuota exigida (opcional)</label>
+            <input type="number" id="dc_min" placeholder="200" min="0" step="50" style="height:34px;font-size:12px">
+          </div>
+          <button class="btn btn-secondary" style="margin-top:14px;font-size:12px;height:34px;" onclick="calcOptimo()">Calcular óptimo ↗</button>
+        </div>
+        <div id="optimo-result" class="hidden" style="margin-top:10px;"></div>
+      </div>
+
+      <div id="z-warning" class="alert warn hidden" style="margin-top:12px"></div>
+      <div class="btn-row">
+        <button class="btn btn-secondary" onclick="goStep(1)">← Volver</button>
+        <button class="btn btn-primary" onclick="calcular()">Calcular →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════ SECCIÓN 3 -->
+  <div class="section" id="sec3">
+    <div class="card">
+      <div class="card-title"><span>3</span> Resultados</div>
+      <div class="tab-bar">
+        <button class="tab-btn active" onclick="showTab('resumen')">Resumen</button>
+        <button class="tab-btn" onclick="showTab('cronograma')">Cronograma completo</button>
+        <button class="tab-btn" onclick="showTab('comparativo')">Comparativo</button>
+      </div>
+
+      <!-- TAB: RESUMEN -->
+      <div class="tab-content active" id="tab-resumen">
+        <div id="result-alert" class="alert success hidden"></div>
+        <div class="results-grid" id="results-grid"></div>
+        <div class="compare-bar" id="compare-bar"></div>
+      </div>
+
+      <!-- TAB: CRONOGRAMA -->
+      <div class="tab-content" id="tab-cronograma">
+        <div class="alert info" style="margin-bottom:12px;font-size:11px">
+          Las filas amarillas indican el momento de la amortización extraordinaria. El cronograma refleja el nuevo plan de pagos.
+        </div>
+        <div class="crono-scroll">
+          <div class="crono-wrap"><table class="crono-table" id="crono-table"></table></div>
+        </div>
+      </div>
+
+      <!-- TAB: COMPARATIVO -->
+      <div class="tab-content" id="tab-comparativo">
+        <div id="comparativo-content"></div>
+      </div>
+    </div>
+    <div class="btn-row" style="justify-content:space-between; margin-top:0;">
+      <button class="btn btn-secondary" onclick="goStep(2)">← Volver</button>
+      <button class="btn btn-primary" onclick="window.print()">Imprimir / Guardar PDF</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+// ESTADO GLOBAL
+// ════════════════════════════════════════════════════════════════
+let S = {
+  currency: 'S/ ', capital: 0, plazo: 0, tea: 0, cuota_total: 0,
+  seguro_total: 0, intereses_orig: 0, cuota_desde: 1,
+  tem: 0, cp_orig: 0, tasa_seguro: 0, saldo_c1: 0,
+  monto_Z: 0, tipo: 'tiempo', pref: 'equilibrio', dc_min: 200
+};
+let currentStep = 1;
+
+// ════════════════════════════════════════════════════════════════
+// UTILIDADES
+// ════════════════════════════════════════════════════════════════
+const fmtN = (v, d=2) => {
+  if(isNaN(v)) return '—';
+  return Number(v).toLocaleString('es-PE', {minimumFractionDigits:d, maximumFractionDigits:d});
+};
+const fmt = v => S.currency + fmtN(v);
+const cuotaPura = (sal, n, tem) => sal * tem * Math.pow(1+tem,n) / (Math.pow(1+tem,n) - 1);
+const nuevoN = (sal, cp, tem) => {
+  const r = sal * tem / cp;
+  if(r >= 1 || sal <= 0) return null;
+  return Math.ceil(-Math.log(1 - r) / Math.log(1 + tem));
+};
+
+// Moneda prefix sync
+document.getElementById('currency').addEventListener('change', function(){
+  S.currency = this.value;
+  const sym = this.value.trim();
+  ['pfx1','pfx2','pfx3','pfx4','pfx5'].forEach(id => document.getElementById(id).textContent = sym);
+});
+
+// Tipo radio
+document.querySelectorAll('input[name=tipo]').forEach(r => {
+  r.addEventListener('change', function(){
+    document.querySelectorAll('.option-card').forEach(c => c.classList.remove('selected'));
+    this.closest('.option-card').classList.add('selected');
+    S.tipo = this.value;
+    const isMixto = this.value.startsWith('mixto');
+    document.getElementById('mixto-controls').classList.toggle('hidden', !isMixto);
+    if(isMixto) syncSliders();
+    // update label order
+    if(this.value === 'mixto_cuota_tiempo'){
+      document.getElementById('sl-label-x').textContent = 'Reduce cuota (Y)';
+      document.getElementById('sl-label-y').textContent = 'Reduce tiempo (X)';
+    } else {
+      document.getElementById('sl-label-x').textContent = 'Reduce tiempo (X)';
+      document.getElementById('sl-label-y').textContent = 'Reduce cuota (Y)';
+    }
+  });
+});
+
+// ════════════════════════════════════════════════════════════════
+// STEP NAVIGATION
+// ════════════════════════════════════════════════════════════════
+function goStep(n){
+  if(n > currentStep) return; // no saltar adelante sin validar
+  currentStep = n;
+  ['sec1','sec2','sec3'].forEach((id,i) => {
+    document.getElementById(id).classList.toggle('active', i+1 === n);
+  });
+  [1,2,3].forEach(i => {
+    const el = document.getElementById('step'+i);
+    el.classList.remove('active','done');
+    if(i === n) el.classList.add('active');
+    else if(i < n) el.classList.add('done');
+  });
+}
+
+// ════════════════════════════════════════════════════════════════
+// STEP 1 VALIDATE
+// ════════════════════════════════════════════════════════════════
+function validateStep1(){
+  const fields = ['capital','plazo','tea','cuota_total','cuota_desde'];
+  let ok = true;
+  fields.forEach(id => {
+    const el = document.getElementById(id);
+    const v = parseFloat(el.value);
+    el.classList.toggle('error', isNaN(v) || v <= 0);
+    if(isNaN(v) || v <= 0) ok = false;
+  });
+  if(!ok){ showPreview('Por favor completa todos los campos obligatorios.', 'warn'); return; }
+
+  S.currency     = document.getElementById('currency').value;
+  S.capital      = parseFloat(document.getElementById('capital').value);
+  S.plazo        = parseInt(document.getElementById('plazo').value);
+  S.tea          = parseFloat(document.getElementById('tea').value) / 100;
+  S.cuota_total  = parseFloat(document.getElementById('cuota_total').value);
+  S.seguro_total = parseFloat(document.getElementById('seguro_total').value) || 0;
+  S.intereses_orig = parseFloat(document.getElementById('intereses_orig').value) || 0;
+  S.cuota_desde  = parseInt(document.getElementById('cuota_desde').value) || 1;
+
+  S.tem          = Math.pow(1 + S.tea, 1/12) - 1;
+  S.cp_orig      = cuotaPura(S.capital, S.plazo, S.tem);
+
+  // Tasa seguro
+  let sumSaldos = 0, saldo = S.capital;
+  for(let i = 0; i < S.plazo; i++){
+    sumSaldos += saldo;
+    saldo -= (S.cp_orig - saldo * S.tem);
+    if(saldo < 0) saldo = 0;
+  }
+  S.tasa_seguro = sumSaldos > 0 ? S.seguro_total / sumSaldos : 0;
+
+  // Calcular saldo tras cuota N
+  saldo = S.capital;
+  let tot_int_pre = 0, tot_seg_pre = 0;
+  for(let i = 0; i < S.cuota_desde; i++){
+    const int_i = saldo * S.tem;
+    const seg_i = saldo * S.tasa_seguro;
+    tot_int_pre += int_i;
+    tot_seg_pre += seg_i;
+    saldo -= (S.cp_orig - int_i);
+    if(saldo < 0.005) saldo = 0;
+  }
+  S.saldo_cN    = saldo;
+  S.n_rest      = S.plazo - S.cuota_desde;
+  S.tot_int_pre = tot_int_pre;
+  S.tot_seg_pre = tot_seg_pre;
+
+  const diff = Math.abs(S.cp_orig - (S.cuota_total - S.capital * S.tasa_seguro));
+  const msg = `Cuota pura calculada: ${fmt(S.cp_orig)} | TEM: ${(S.tem*100).toFixed(4)}% | Saldo tras cuota ${S.cuota_desde}: ${fmt(S.saldo_cN)}`;
+  showPreview(msg, 'info');
+
+  // Setup step 2 sliders
+  const Z = parseFloat(document.getElementById('monto_Z').value) || 0;
+  if(Z > 0) setupSliders(Z);
+
+  setTimeout(() => {
+    currentStep = 1;
+    goStep(2);
+  }, 200);
+}
+
+function showPreview(msg, type='info'){
+  const el = document.getElementById('calc-preview');
+  el.className = 'alert ' + type;
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+
+// ════════════════════════════════════════════════════════════════
+// SLIDERS
+// ════════════════════════════════════════════════════════════════
+function onZChange(){
+  const Z = parseFloat(document.getElementById('monto_Z').value) || 0;
+  setupSliders(Z);
+  // warn if Z > saldo
+  const warn = document.getElementById('z-warning');
+  if(Z > S.saldo_cN && S.saldo_cN > 0){
+    warn.textContent = `Atención: el monto Z (${fmt(Z)}) supera el saldo pendiente (${fmt(S.saldo_cN)}). Ajusta el monto.`;
+    warn.classList.remove('hidden');
+  } else { warn.classList.add('hidden'); }
+}
+function setupSliders(Z){
+  const sx = document.getElementById('slider-x');
+  const sy = document.getElementById('slider-y');
+  sx.max = Z; sy.max = Z;
+  const xv = Math.min(parseFloat(sx.value)||0, Z);
+  sx.value = xv; sy.value = Z - xv;
+  updateSliderDisplay(Z, xv);
+}
+function onSliderX(){
+  const Z = parseFloat(document.getElementById('monto_Z').value)||0;
+  const x = parseFloat(document.getElementById('slider-x').value)||0;
+  document.getElementById('slider-y').value = Z - x;
+  updateSliderDisplay(Z, x);
+}
+function onSliderY(){
+  const Z = parseFloat(document.getElementById('monto_Z').value)||0;
+  const y = parseFloat(document.getElementById('slider-y').value)||0;
+  document.getElementById('slider-x').value = Z - y;
+  updateSliderDisplay(Z, Z - y);
+}
+function updateSliderDisplay(Z, x){
+  const y = Z - x;
+  document.getElementById('sv-x').textContent = fmt(x);
+  document.getElementById('sv-y').textContent = fmt(y);
+  const tot = document.getElementById('sl-total');
+  const sum = x + y;
+  tot.textContent = `Total distribuido: ${fmt(sum)} de ${fmt(Z)}`;
+  tot.className = 'slider-total ' + (Math.abs(sum - Z) < 1 ? 'ok' : 'warn');
+  document.getElementById('optimo-result').classList.add('hidden');
+}
+function syncSliders(){
+  const Z = parseFloat(document.getElementById('monto_Z').value)||0;
+  if(Z > 0) setupSliders(Z);
+}
+
+// PREF BUTTONS
+function setPref(p){
+  S.pref = p;
+  ['ahorro','equilibrio','cuota'].forEach(k => {
+    document.getElementById('pref-'+k).classList.toggle('active', k === p);
+  });
+}
+
+// ════════════════════════════════════════════════════════════════
+// OPTIMIZADOR
+// ════════════════════════════════════════════════════════════════
+function calcOptimo(){
+  const Z = parseFloat(document.getElementById('monto_Z').value)||0;
+  const dcMin = parseFloat(document.getElementById('dc_min').value)||0;
+  if(Z <= 0 || S.saldo_cN <= 0){ alert('Primero completa los datos del préstamo.'); return; }
+
+  const tipo = document.querySelector('input[name=tipo]:checked').value;
+  const resultados = [];
+  const paso = Math.max(500, Math.round(Z/80/500)*500);
+
+  for(let x = 0; x <= Z; x += paso){
+    const y = Z - x;
+    // Para mixto_cuota_tiempo: el slider X es la parte "cuota" y slider Y es "tiempo"
+    // Pero en el optimizador siempre llamamos simMixto(X_tiempo, Y_cuota, orden)
+    const r = (tipo === 'mixto_cuota_tiempo')
+      ? simMixto(x, y, 'cuota_tiempo')   // x=reduce tiempo en este contexto
+      : simMixto(x, y, 'tiempo_cuota');
+    if(r) resultados.push(r);
+  }
+
+  const cands = resultados.filter(r => r.dc >= dcMin);
+  if(!cands.length){ document.getElementById('optimo-result').innerHTML = '<div class="alert warn">No hay combinaciones que cumplan el mínimo de bajada de cuota especificado.</div>'; document.getElementById('optimo-result').classList.remove('hidden'); return; }
+
+  const ahMin = Math.min(...cands.map(r=>r.ahorro));
+  const ahMax = Math.max(...cands.map(r=>r.ahorro));
+  const dcMin2= Math.min(...cands.map(r=>r.dc));
+  const dcMax = Math.max(...cands.map(r=>r.dc));
+
+  let best;
+  if(S.pref === 'ahorro'){
+    best = cands.reduce((a,b) => a.ahorro >= b.ahorro ? a : b);
+  } else if(S.pref === 'cuota'){
+    best = cands.reduce((a,b) => a.dc >= b.dc ? a : b);
+  } else {
+    cands.forEach(r => {
+      const ahn = ahMax > ahMin ? (r.ahorro - ahMin)/(ahMax - ahMin) : 1;
+      const dcn = dcMax > dcMin2 ? (r.dc - dcMin2)/(dcMax - dcMin2) : 1;
+      r.score = 0.5*ahn + 0.5*dcn;
+    });
+    best = cands.reduce((a,b) => a.score >= b.score ? a : b);
+  }
+
+  // Aplicar al slider
+  document.getElementById('slider-x').value = best.X;
+  document.getElementById('slider-y').value = best.Y;
+  updateSliderDisplay(Z, best.X);
+
+  const el = document.getElementById('optimo-result');
+  el.innerHTML = `<div class="alert success">
+    <strong>Óptimo calculado:</strong> X = ${fmt(best.X)} (tiempo) · Y = ${fmt(best.Y)} (cuota)<br>
+    Ahorro estimado: ${fmt(best.ahorro)} · Meses: ${best.n_total} · Cuota nueva ≈ ${fmt(best.cuota_disp)} (↓${fmt(best.dc)})
+    ${S.pref==='equilibrio' ? ' · Score equilibrio: '+(best.score||0).toFixed(4) : ''}
+  </div>`;
+  el.classList.remove('hidden');
+}
+
+// ════════════════════════════════════════════════════════════════
+// SIMULACIÓN CENTRAL
+// ════════════════════════════════════════════════════════════════
+function simTodo(tipoSim, X, Y){
+  // tipoSim: 'tiempo' | 'cuota' | 'cuota_tiempo' | 'tiempo_cuota'
+  // X = parte que reduce tiempo, Y = parte que reduce cuota
+  const tem = S.tem;
+  const cp0 = S.cp_orig;
+  let ti = S.tot_int_pre, ts = S.tot_seg_pre;
+  let saldo = S.saldo_cN;
+  const n_rest = S.n_rest;
+
+  let cp_final, n_final, saldo_ini_bloque;
+
+  if(tipoSim === 'tiempo'){
+    // Todo a reducir tiempo: cuota = cp0, calcular nuevo n
+    saldo -= X; if(saldo <= 0) return null;
+    const nN = nuevoN(saldo, cp0, tem); if(!nN) return null;
+    cp_final = cp0; n_final = nN; saldo_ini_bloque = saldo;
+
+  } else if(tipoSim === 'cuota'){
+    // Todo a reducir cuota: n = n_rest, calcular nueva cuota
+    saldo -= Y; if(saldo <= 0) return null;
+    cp_final = cuotaPura(saldo, n_rest, tem);
+    n_final = n_rest; saldo_ini_bloque = saldo;
+
+  } else if(tipoSim === 'cuota_tiempo'){
+    // Orden: cuota primero (Y), luego tiempo (X)
+    saldo -= Y; if(saldo <= 0) return null;
+    const cp_b = cuotaPura(saldo, n_rest, tem);
+    saldo -= X; if(saldo <= 0) return null;
+    const nN = nuevoN(saldo, cp_b, tem); if(!nN) return null;
+    cp_final = cp_b; n_final = nN; saldo_ini_bloque = saldo;
+
+  } else { // tiempo_cuota
+    // Orden: tiempo primero (X), luego cuota (Y)
+    saldo -= X; if(saldo <= 0) return null;
+    const nN = nuevoN(saldo, cp0, tem); if(!nN) return null;
+    saldo -= Y; if(saldo <= 0) return null;
+    cp_final = cuotaPura(saldo, nN, tem);
+    n_final = nN; saldo_ini_bloque = saldo;
+  }
+
+  // Simular
+  let s = saldo_ini_bloque;
+  for(let i = 0; i < n_final; i++){
+    ti += s * tem;
+    ts += s * S.tasa_seguro;
+    s -= (cp_final - s * tem);
+    if(s < 0.005) s = 0;
+  }
+
+  const n_total = S.cuota_desde + n_final;
+  const int_orig = S.intereses_orig || (ti + 9999); // fallback
+  const seg_orig = S.seguro_total;
+  const ahorro_int = (S.intereses_orig > 0) ? S.intereses_orig - ti : null;
+  const ahorro_seg = seg_orig - ts;
+  const ahorro_tot = (S.intereses_orig > 0 && seg_orig > 0) ? (S.intereses_orig + seg_orig) - (ti + ts) : null;
+  const cuota_disp = cp_final + saldo_ini_bloque * S.tasa_seguro;
+
+  return {
+    tipo: tipoSim, X, Y,
+    tot_int: ti, tot_seg: ts,
+    ahorro_int, ahorro_seg, ahorro: ahorro_tot,
+    n_total, meses_menos: S.plazo - n_total,
+    cp: cp_final, cuota_disp,
+    dc: S.cuota_total - cuota_disp,
+    saldo_ini_bloque
+  };
+}
+
+function simMixto(X, Y, orden){ return simTodo(orden, X, Y); }
+
+// ════════════════════════════════════════════════════════════════
+// CRONOGRAMA COMPLETO
+// ════════════════════════════════════════════════════════════════
+function buildCronograma(tipoSim, X, Y){
+  const tem = S.tem; const cp0 = S.cp_orig;
+  const rows = [];
+  let saldo = S.capital;
+  let cp_final, n_final, saldo_ini_bloque, n_rest = S.n_rest;
+
+  // Cuotas previas a la amortización
+  for(let i = 1; i <= S.cuota_desde; i++){
+    const int_i = saldo * tem;
+    const seg_i = saldo * S.tasa_seguro;
+    const amort_i = cp0 - int_i;
+    const cuota_i = cp0 + seg_i;
+    rows.push({ mes: i, saldo_ini: saldo, interes: int_i, amort: amort_i, seguro: seg_i, cuota: cuota_i, saldo_fin: saldo - amort_i, tipo_row: 'normal' });
+    saldo -= amort_i;
+    if(saldo < 0.005) saldo = 0;
+  }
+
+  // AMORTIZACIONES
+  let amort_events = [];
+  let cp_temp = cp0;
+
+  if(tipoSim === 'tiempo'){
+    amort_events.push({ label: 'Amortización extraordinaria (reduce tiempo)', monto: X });
+    saldo -= X; cp_final = cp0;
+    const nN = nuevoN(saldo, cp0, tem);
+    n_final = nN; saldo_ini_bloque = saldo;
+  } else if(tipoSim === 'cuota'){
+    amort_events.push({ label: 'Amortización extraordinaria (reduce cuota)', monto: Y });
+    saldo -= Y;
+    cp_final = cuotaPura(saldo, n_rest, tem);
+    n_final = n_rest; saldo_ini_bloque = saldo;
+  } else if(tipoSim === 'cuota_tiempo'){
+    amort_events.push({ label: 'Amortización 1 — reduce cuota (Y)', monto: Y });
+    amort_events.push({ label: 'Amortización 2 — reduce tiempo (X)', monto: X });
+    saldo -= Y; cp_temp = cuotaPura(saldo, n_rest, tem);
+    saldo -= X;
+    const nN = nuevoN(saldo, cp_temp, tem);
+    cp_final = cp_temp; n_final = nN; saldo_ini_bloque = saldo;
+  } else {
+    amort_events.push({ label: 'Amortización 1 — reduce tiempo (X)', monto: X });
+    amort_events.push({ label: 'Amortización 2 — reduce cuota (Y)', monto: Y });
+    saldo -= X;
+    const nN = nuevoN(saldo, cp0, tem);
+    saldo -= Y;
+    cp_final = cuotaPura(saldo, nN, tem);
+    n_final = nN; saldo_ini_bloque = saldo;
+  }
+
+  amort_events.forEach(e => rows.push({ tipo_row: 'amort', label: e.label, monto: e.monto }));
+
+  // Cuotas restantes
+  saldo = saldo_ini_bloque;
+  for(let i = 0; i < n_final; i++){
+    const mes = S.cuota_desde + 1 + i;
+    const int_i = saldo * tem;
+    const seg_i = saldo * S.tasa_seguro;
+    const amort_i = cp_final - int_i;
+    const cuota_i = cp_final + seg_i;
+    const sf = saldo - amort_i;
+    rows.push({ mes, saldo_ini: saldo, interes: int_i, amort: amort_i, seguro: seg_i, cuota: cuota_i, saldo_fin: Math.max(0, sf), tipo_row: 'normal' });
+    saldo = Math.max(0, sf);
+  }
+  return rows;
+}
+
+// ════════════════════════════════════════════════════════════════
+// CALCULAR (botón principal)
+// ════════════════════════════════════════════════════════════════
+function calcular(){
+  const Z = parseFloat(document.getElementById('monto_Z').value)||0;
+  if(Z <= 0){ alert('Ingresa el monto a amortizar (Z).'); return; }
+  if(S.saldo_cN <= 0){ alert('Primero completa los datos del préstamo.'); return; }
+  if(Z > S.saldo_cN){ alert(`El monto Z (${fmt(Z)}) supera el saldo pendiente (${fmt(S.saldo_cN)}).`); return; }
+
+  S.monto_Z = Z;
+  S.tipo = document.querySelector('input[name=tipo]:checked').value;
+
+  let X = Z, Y = 0;
+  if(S.tipo.startsWith('mixto')){
+    const xv = parseFloat(document.getElementById('slider-x').value)||0;
+    const yv = parseFloat(document.getElementById('slider-y').value)||0;
+    // Según el orden seleccionado, el slider-x puede ser "tiempo" o "cuota"
+    if(S.tipo === 'mixto_cuota_tiempo'){
+      // slider-x = cuota (Y), slider-y = tiempo (X) — label fue cambiado
+      Y = xv; X = yv;
+    } else {
+      X = xv; Y = yv;
+    }
+  } else if(S.tipo === 'cuota'){
+    X = 0; Y = Z;
+  }
+
+  const tipoSim = S.tipo.replace('mixto_','');
+  const res = simTodo(tipoSim, X, Y);
+  if(!res){ alert('No se pudo calcular. Verifica los datos.'); return; }
+
+  const crono = buildCronograma(tipoSim, X, Y);
+  renderResultados(res, crono, X, Y);
+  currentStep = 2;
+  goStep(3);
+}
+
+// ════════════════════════════════════════════════════════════════
+// RENDER RESULTADOS
+// ════════════════════════════════════════════════════════════════
+function renderResultados(res, crono, X, Y){
+  // Alert
+  const alert_el = document.getElementById('result-alert');
+  const label_tipo = { tiempo:'Todo a reducir tiempo', cuota:'Todo a reducir cuota', cuota_tiempo:'Mixto: cuota → tiempo', tiempo_cuota:'Mixto: tiempo → cuota' };
+  alert_el.innerHTML = `<strong>${label_tipo[res.tipo]}</strong> · Z = ${fmt(S.monto_Z)} ${res.tipo.startsWith('cuota_tiempo')||res.tipo.startsWith('tiempo_cuota') ? `(X=${fmt(X)}, Y=${fmt(Y)})` : ''}`;
+  alert_el.classList.remove('hidden');
+
+  // Metrics
+  const grid = document.getElementById('results-grid');
+  const metrics = [
+    { label:'Meses restantes', val: res.n_total, sub: `Reducción: -${res.meses_menos} meses`, cls: res.meses_menos > 0 ? 'green' : '', highlight: res.meses_menos > 0 },
+    { label:'Cuota nueva (aprox.)', val: fmt(res.cuota_disp), sub: `Antes: ${fmt(S.cuota_total)} · Baja: ${fmt(res.dc)}`, cls: res.dc > 0 ? 'green' : '' },
+    { label:'Total intereses', val: fmt(res.tot_int), sub: S.intereses_orig > 0 ? `Antes: ${fmt(S.intereses_orig)}` : '', cls:'' },
+    { label:'Total seguro', val: fmt(res.tot_seg), sub: S.seguro_total > 0 ? `Antes: ${fmt(S.seguro_total)}` : '', cls:'' },
+    { label:'Ahorro en intereses', val: res.ahorro_int !== null ? fmt(res.ahorro_int) : '—', sub:'Reducción directa de intereses', cls:'green', highlight: true },
+    { label:'Ahorro total (int + seg)', val: res.ahorro !== null ? fmt(res.ahorro) : '—', sub:'Intereses + seguro ahorrado', cls:'green', highlight: res.ahorro > 0 },
+  ];
+  grid.innerHTML = metrics.map(m => `
+    <div class="metric ${m.highlight?'highlight':''}">
+      <div class="m-label">${m.label}</div>
+      <div class="m-val ${m.cls||''}">${m.val}</div>
+      <div class="m-sub">${m.sub||''}</div>
+    </div>`).join('');
+
+  // Bar chart
+  if(S.intereses_orig > 0){
+    const barEl = document.getElementById('compare-bar');
+    const maxV = S.intereses_orig + S.seguro_total;
+    const after = res.tot_int + res.tot_seg;
+    barEl.innerHTML = `
+      <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:10px">Comparación visual</div>
+      ${barRow('Sin amortizar', S.intereses_orig + S.seguro_total, maxV, 'blue')}
+      ${barRow('Con amortización', after, maxV, 'green')}
+    `;
+  }
+
+  // CRONOGRAMA
+  renderCronograma(crono);
+
+  // COMPARATIVO
+  renderComparativo(res, X, Y);
+}
+
+function barRow(label, val, max, cls){
+  const pct = Math.round(val/max*100);
+  return `<div class="bar-row">
+    <div class="bar-label">${label}</div>
+    <div class="bar-track"><div class="bar-fill ${cls}" style="width:${pct}%"></div></div>
+    <div class="bar-val">${fmt(val)}</div>
+  </div>`;
+}
+
+function renderCronograma(crono){
+  const table = document.getElementById('crono-table');
+  let thead = `<thead><tr>
+    <th>Cuota</th><th style="text-align:left">Saldo inicial</th>
+    <th>Interés</th><th>Amortización</th><th>Seguro</th><th>Cuota total</th><th>Saldo final</th>
+  </tr></thead>`;
+  let tbody = '<tbody>';
+  let tot_int=0, tot_amort=0, tot_seg=0, tot_cuota=0;
+
+  crono.forEach(r => {
+    if(r.tipo_row === 'amort'){
+      tbody += `<tr class="amort-row"><td colspan="7" style="text-align:left;font-size:11px;padding:8px 10px">
+        ⚡ ${r.label} — ${fmt(r.monto)}</td></tr>`;
+    } else {
+      tot_int += r.interes; tot_amort += r.amort; tot_seg += r.seguro; tot_cuota += r.cuota;
+      tbody += `<tr>
+        <td>${r.mes}</td>
+        <td style="text-align:left">${fmt(r.saldo_ini)}</td>
+        <td>${fmt(r.interes)}</td>
+        <td>${fmt(r.amort)}</td>
+        <td>${fmt(r.seguro)}</td>
+        <td class="green">${fmt(r.cuota)}</td>
+        <td>${fmt(r.saldo_fin)}</td>
+      </tr>`;
+    }
+  });
+  tbody += `</tbody>`;
+  let tfoot = `<tfoot><tr>
+    <td>Total</td><td></td>
+    <td>${fmt(tot_int)}</td><td>${fmt(tot_amort)}</td>
+    <td>${fmt(tot_seg)}</td><td>${fmt(tot_cuota)}</td><td></td>
+  </tr></tfoot>`;
+  table.innerHTML = thead + tbody + tfoot;
+}
+
+function renderComparativo(res, X, Y){
+  const el = document.getElementById('comparativo-content');
+  if(S.intereses_orig <= 0){ el.innerHTML = '<div class="alert info">Ingresa el total de intereses originales para ver el comparativo completo.</div>'; return; }
+
+  const rows_comp = [
+    ['tiempo','Todo a tiempo (máx. ahorro)', X+Y, 0],
+    ['cuota','Todo a cuota (máx. bajada cuota)', 0, X+Y],
+    [res.tipo, 'Tu elección actual', X, Y],
+  ].filter((v,i,a) => a.findIndex(b=>b[0]===v[0])===i);
+
+  let html = `<div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:14px">Comparativo de escenarios</div>`;
+  html += `<table style="width:100%;border-collapse:collapse;font-size:12px">
+    <thead><tr style="border-bottom:1.5px solid var(--border)">
+      <th style="text-align:left;padding:6px 8px;font-size:11px;color:var(--text3)">Escenario</th>
+      <th style="text-align:right;padding:6px 8px;font-size:11px;color:var(--text3)">Ahorro total</th>
+      <th style="text-align:right;padding:6px 8px;font-size:11px;color:var(--text3)">Meses totales</th>
+      <th style="text-align:right;padding:6px 8px;font-size:11px;color:var(--text3)">Cuota nueva</th>
+      <th style="text-align:right;padding:6px 8px;font-size:11px;color:var(--text3)">↓ Cuota</th>
+    </tr></thead><tbody>`;
+
+  rows_comp.forEach(([tipo, label, xi, yi]) => {
+    const tipoSim = tipo.replace('mixto_','');
+    const r = simTodo(tipoSim, xi, yi);
+    if(!r) return;
+    const isCurrent = tipo === res.tipo;
+    html += `<tr style="${isCurrent?'background:var(--accent-light);font-weight:500':''}">
+      <td style="padding:7px 8px;border-bottom:1px solid var(--border)">${label}${isCurrent?' <span class="tag green">actual</span>':''}</td>
+      <td style="padding:7px 8px;border-bottom:1px solid var(--border);text-align:right;font-family:'DM Mono',monospace;color:var(--accent)">${r.ahorro!==null?fmt(r.ahorro):'—'}</td>
+      <td style="padding:7px 8px;border-bottom:1px solid var(--border);text-align:right;font-family:'DM Mono',monospace">${r.n_total}</td>
+      <td style="padding:7px 8px;border-bottom:1px solid var(--border);text-align:right;font-family:'DM Mono',monospace">${fmt(r.cuota_disp)}</td>
+      <td style="padding:7px 8px;border-bottom:1px solid var(--border);text-align:right;font-family:'DM Mono',monospace;color:${r.dc>0?'var(--accent)':'var(--text2)'}">${r.dc>0?'-'+fmt(r.dc):'—'}</td>
+    </tr>`;
+  });
+  html += `</tbody></table>`;
+  el.innerHTML = html;
+}
+
+// ════════════════════════════════════════════════════════════════
+// TABS
+// ════════════════════════════════════════════════════════════════
+function showTab(name){
+  document.querySelectorAll('.tab-btn').forEach((b,i) => {
+    const names = ['resumen','cronograma','comparativo'];
+    b.classList.toggle('active', names[i] === name);
+  });
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+}
+
+// Init
+document.getElementById('cuota_desde').value = 1;
+</script>
+</body>
+</html>
