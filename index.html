@@ -702,12 +702,22 @@ function simTodo(tipoSim, X, Y){
   }
 
   const n_total = S.cuota_desde + n_final;
-  const int_orig = S.intereses_orig || (ti + 9999); // fallback
   const seg_orig = S.seguro_total;
   const ahorro_int = (S.intereses_orig > 0) ? S.intereses_orig - ti : null;
   const ahorro_seg = seg_orig - ts;
   const ahorro_tot = (S.intereses_orig > 0 && seg_orig > 0) ? (S.intereses_orig + seg_orig) - (ti + ts) : null;
-  const cuota_disp = cp_final + saldo_ini_bloque * S.tasa_seguro;
+
+  // Para "reducir tiempo": la cuota PURA es inamovible (= cp_orig).
+  // El seguro baja porque el saldo baja, pero eso no es "bajada de cuota".
+  // dc = 0 para que quede claro que la cuota no cambió.
+  let cuota_disp, dc;
+  if(tipoSim === 'tiempo'){
+    cuota_disp = S.cuota_total;
+    dc = 0;
+  } else {
+    cuota_disp = cp_final + saldo_ini_bloque * S.tasa_seguro;
+    dc = S.cuota_total - cuota_disp;
+  }
 
   return {
     tipo: tipoSim, X, Y,
@@ -715,7 +725,7 @@ function simTodo(tipoSim, X, Y){
     ahorro_int, ahorro_seg, ahorro: ahorro_tot,
     n_total, meses_menos: S.plazo - n_total,
     cp: cp_final, cuota_disp,
-    dc: S.cuota_total - cuota_disp,
+    dc,
     saldo_ini_bloque
   };
 }
@@ -841,7 +851,12 @@ function renderResultados(res, crono, X, Y){
   const grid = document.getElementById('results-grid');
   const metrics = [
     { label:'Meses restantes', val: res.n_total, sub: `Reducción: -${res.meses_menos} meses`, cls: res.meses_menos > 0 ? 'green' : '', highlight: res.meses_menos > 0 },
-    { label:'Cuota nueva (aprox.)', val: fmt(res.cuota_disp), sub: `Antes: ${fmt(S.cuota_total)} · Baja: ${fmt(res.dc)}`, cls: res.dc > 0 ? 'green' : '' },
+    { label: res.tipo === 'tiempo' ? 'Cuota mensual' : 'Cuota nueva (aprox.)',
+      val: res.tipo === 'tiempo' ? fmt(res.cuota_disp) : fmt(res.cuota_disp),
+      sub: res.tipo === 'tiempo'
+        ? `Inamovible — cuota pura: ${fmt(res.cp)} (no cambia al reducir tiempo)`
+        : `Antes: ${fmt(S.cuota_total)} · Baja: ${fmt(res.dc)}`,
+      cls: res.tipo === 'tiempo' ? 'amber' : (res.dc > 0 ? 'green' : '') },
     { label:'Total intereses', val: fmt(res.tot_int), sub: S.intereses_orig > 0 ? `Antes: ${fmt(S.intereses_orig)}` : '', cls:'' },
     { label:'Total seguro', val: fmt(res.tot_seg), sub: S.seguro_total > 0 ? `Antes: ${fmt(S.seguro_total)}` : '', cls:'' },
     { label:'Ahorro en intereses', val: res.ahorro_int !== null ? fmt(res.ahorro_int) : '—', sub:'Reducción directa de intereses', cls:'green', highlight: true },
