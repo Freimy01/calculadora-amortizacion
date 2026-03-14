@@ -452,7 +452,6 @@ document.querySelectorAll('input[name=tipo]').forEach(r => {
 // STEP NAVIGATION
 // ════════════════════════════════════════════════════════════════
 function goStep(n){
-  if(n > currentStep) return; // no saltar adelante sin validar
   currentStep = n;
   ['sec1','sec2','sec3'].forEach((id,i) => {
     document.getElementById(id).classList.toggle('active', i+1 === n);
@@ -525,7 +524,6 @@ function validateStep1(){
   if(Z > 0) setupSliders(Z);
 
   setTimeout(() => {
-    currentStep = 1;
     goStep(2);
   }, 200);
 }
