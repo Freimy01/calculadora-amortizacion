@@ -189,6 +189,18 @@ header p { font-size: 13px; color: var(--text2); margin-top: 4px; }
 .tag.blue  { background: var(--info-light);  color: var(--info); }
 .divider { height: 1px; background: var(--border); margin: 16px 0; }
 .mono { font-family: 'DM Mono', monospace; }
+
+/* ── PLAZO TOGGLE ── */
+.plazo-toggle { display: flex; gap: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; margin-bottom: 8px; width: fit-content; }
+.plazo-toggle button { padding: 5px 14px; font-size: 11px; font-weight: 500; font-family: inherit; border: none; background: var(--surface); color: var(--text3); cursor: pointer; transition: all .15s; border-right: 1px solid var(--border); }
+.plazo-toggle button:last-child { border-right: none; }
+.plazo-toggle button.active { background: var(--accent); color: white; }
+.plazo-toggle button:hover:not(.active) { background: var(--surface2); color: var(--text2); }
+.plazo-fechas { display: none; gap: 10px; }
+.plazo-fechas.visible { display: flex; }
+.plazo-meses { display: block; }
+.plazo-meses.hidden { display: none; }
+.fecha-calculada { margin-top: 6px; font-size: 12px; color: var(--accent); font-weight: 500; font-family: 'DM Mono', monospace; min-height: 18px; }
 </style>
 </head>
 <body>
@@ -233,8 +245,28 @@ header p { font-size: 13px; color: var(--text2); margin-top: 4px; }
           <div class="hint">Monto total prestado por el banco</div>
         </div>
         <div class="field">
-          <label>Plazo original (meses)</label>
-          <input type="number" id="plazo" placeholder="68" min="1" max="600">
+          <label>Plazo original</label>
+          <div class="plazo-toggle">
+            <button id="toggle-meses" class="active" onclick="switchPlazo('meses')">En meses</button>
+            <button id="toggle-fechas" onclick="switchPlazo('fechas')">Por fechas</button>
+          </div>
+          <!-- Opción A: meses directo -->
+          <div class="plazo-meses" id="plazo-meses-wrap">
+            <input type="number" id="plazo" placeholder="68" min="1" max="600">
+            <div class="hint">Número total de cuotas del préstamo</div>
+          </div>
+          <!-- Opción B: fecha inicio + fecha fin -->
+          <div class="plazo-fechas" id="plazo-fechas-wrap">
+            <div class="field" style="margin:0;flex:1">
+              <label style="font-size:11px">Fecha 1ª cuota</label>
+              <input type="month" id="fecha_inicio" onchange="calcularPlazoFechas()" style="height:38px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;font-family:inherit;color:var(--text);background:var(--surface);outline:none;">
+            </div>
+            <div class="field" style="margin:0;flex:1">
+              <label style="font-size:11px">Fecha última cuota</label>
+              <input type="month" id="fecha_fin" onchange="calcularPlazoFechas()" style="height:38px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;font-family:inherit;color:var(--text);background:var(--surface);outline:none;">
+            </div>
+          </div>
+          <div class="fecha-calculada" id="plazo-calculado"></div>
         </div>
       </div>
       <div class="form-grid three" style="margin-bottom:14px">
@@ -374,7 +406,9 @@ header p { font-size: 13px; color: var(--text2); margin-top: 4px; }
       <!-- TAB: CRONOGRAMA -->
       <div class="tab-content" id="tab-cronograma">
         <div class="alert info" style="margin-bottom:12px;font-size:11px">
-          Las filas amarillas indican el momento de la amortización extraordinaria. El cronograma refleja el nuevo plan de pagos.
+          Las filas amarillas indican el momento de la amortización extraordinaria. El cronograma refleja el nuevo plan de pagos.<br>
+          <strong>Cuota pura</strong> = interés + amortización de capital: esta es la parte fija e inamovible en sistema francés.<br>
+          <strong>Total c/seguro</strong> = cuota pura + seguro del mes: varía ligeramente porque el seguro de desgravamen se recalcula sobre el saldo pendiente de cada mes (saldo menor → seguro menor).
         </div>
         <div class="crono-scroll">
           <div class="crono-wrap"><table class="crono-table" id="crono-table"></table></div>
@@ -401,8 +435,7 @@ header p { font-size: 13px; color: var(--text2); margin-top: 4px; }
 let S = {
   currency: 'S/ ', capital: 0, plazo: 0, tea: 0, cuota_total: 0,
   seguro_total: 0, intereses_orig: 0, cuota_desde: 1,
-  tem: 0, cp_orig: 0, tasa_seguro: 0, saldo_c1: 0,
-  monto_Z: 0, tipo: 'tiempo', pref: 'equilibrio', dc_min: 200
+  tem: 0, cp_orig: 0, tasa_seguro: 0, saldo_cN: 0
 };
 let currentStep = 1;
 
@@ -414,12 +447,48 @@ const fmtN = (v, d=2) => {
   return Number(v).toLocaleString('es-PE', {minimumFractionDigits:d, maximumFractionDigits:d});
 };
 const fmt = v => S.currency + fmtN(v);
+
+// Cuota pura (sin seguro) — solo para referencia y modo sin seguro
 const cuotaPura = (sal, n, tem) => sal * tem * Math.pow(1+tem,n) / (Math.pow(1+tem,n) - 1);
-const nuevoN = (sal, cp, tem) => {
-  const r = sal * tem / cp;
-  if(r >= 1 || sal <= 0) return null;
-  return Math.ceil(-Math.log(1 - r) / Math.log(1 + tem));
-};
+
+// Nuevo n iterando con cuota_total FIJA (incluye seguro variable sobre saldo)
+// Retorna número de cuotas necesarias para liquidar el saldo con cuota_total fija
+function nuevoN_conSeguro(saldo, cuota_tot, tem, tasa_seg) {
+  if(saldo <= 0) return 0;
+  let s = saldo, n = 0;
+  while(s > 0.50 && n < 1200) {
+    const int_i  = s * tem;
+    const seg_i  = s * tasa_seg;
+    const amort_i = cuota_tot - int_i - seg_i;
+    if(amort_i <= 0) return null; // cuota no alcanza ni para intereses+seguro
+    s -= amort_i;
+    n++;
+  }
+  return n;
+}
+
+// Back-calcular tasa_seguro con búsqueda binaria para que sum(seg_i) = seguro_total
+// usando el modelo correcto: amort = cuota_total - interés - seguro
+function calcTasaSeguro(cap, n, tem, cuota_tot, seg_total) {
+  if(seg_total <= 0) return 0;
+  let lo = 0, hi = 0.05;
+  for(let iter = 0; iter < 80; iter++) {
+    const mid = (lo + hi) / 2;
+    let saldo = cap, suma = 0;
+    let ok = true;
+    for(let i = 0; i < n; i++) {
+      const int_i   = saldo * tem;
+      const seg_i   = saldo * mid;
+      const amort_i = cuota_tot - int_i - seg_i;
+      if(amort_i <= 0) { ok = false; break; }
+      suma += seg_i;
+      saldo -= amort_i;
+    }
+    if(!ok) { hi = mid; continue; }
+    if(suma < seg_total) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
 
 // Moneda prefix sync
 document.getElementById('currency').addEventListener('change', function(){
@@ -437,7 +506,6 @@ document.querySelectorAll('input[name=tipo]').forEach(r => {
     const isMixto = this.value.startsWith('mixto');
     document.getElementById('mixto-controls').classList.toggle('hidden', !isMixto);
     if(isMixto) syncSliders();
-    // update label order
     if(this.value === 'mixto_cuota_tiempo'){
       document.getElementById('sl-label-x').textContent = 'Reduce cuota (Y)';
       document.getElementById('sl-label-y').textContent = 'Reduce tiempo (X)';
@@ -468,46 +536,50 @@ function goStep(n){
 // STEP 1 VALIDATE
 // ════════════════════════════════════════════════════════════════
 function validateStep1(){
+  // Determinar plazo según modo activo
+  const modoFechas = document.getElementById('toggle-fechas').classList.contains('active');
+  if(modoFechas){
+    const p = calcularPlazoFechas();
+    if(!p || p < 1){ showPreview('Por favor ingresa las fechas de inicio y término del préstamo.', 'warn'); return; }
+    document.getElementById('plazo').value = p;
+  }
+
   const fields = ['capital','plazo','tea','cuota_total','cuota_desde'];
   let ok = true;
   fields.forEach(id => {
     const el = document.getElementById(id);
-    const v = parseFloat(el.value);
+    const v  = parseFloat(el.value);
     el.classList.toggle('error', isNaN(v) || v <= 0);
     if(isNaN(v) || v <= 0) ok = false;
   });
   if(!ok){ showPreview('Por favor completa todos los campos obligatorios.', 'warn'); return; }
 
-  S.currency     = document.getElementById('currency').value;
-  S.capital      = parseFloat(document.getElementById('capital').value);
-  S.plazo        = parseInt(document.getElementById('plazo').value);
-  S.tea          = parseFloat(document.getElementById('tea').value) / 100;
-  S.cuota_total  = parseFloat(document.getElementById('cuota_total').value);
-  S.seguro_total = parseFloat(document.getElementById('seguro_total').value) || 0;
-  S.intereses_orig = parseFloat(document.getElementById('intereses_orig').value) || 0;
-  S.cuota_desde  = parseInt(document.getElementById('cuota_desde').value) || 1;
+  S.currency      = document.getElementById('currency').value;
+  S.capital       = parseFloat(document.getElementById('capital').value);
+  S.plazo         = parseInt(document.getElementById('plazo').value);
+  S.tea           = parseFloat(document.getElementById('tea').value) / 100;
+  S.cuota_total   = parseFloat(document.getElementById('cuota_total').value);
+  S.seguro_total  = parseFloat(document.getElementById('seguro_total').value) || 0;
+  S.intereses_orig= parseFloat(document.getElementById('intereses_orig').value) || 0;
+  S.cuota_desde   = parseInt(document.getElementById('cuota_desde').value) || 1;
+  S.tem           = Math.pow(1 + S.tea, 1/12) - 1;
 
-  S.tem          = Math.pow(1 + S.tea, 1/12) - 1;
-  S.cp_orig      = cuotaPura(S.capital, S.plazo, S.tem);
+  // Back-calcular tasa_seguro con modelo correcto (cuota total fija)
+  S.tasa_seguro = calcTasaSeguro(S.capital, S.plazo, S.tem, S.cuota_total, S.seguro_total);
 
-  // Tasa seguro
-  let sumSaldos = 0, saldo = S.capital;
-  for(let i = 0; i < S.plazo; i++){
-    sumSaldos += saldo;
-    saldo -= (S.cp_orig - saldo * S.tem);
-    if(saldo < 0) saldo = 0;
-  }
-  S.tasa_seguro = sumSaldos > 0 ? S.seguro_total / sumSaldos : 0;
+  // Cuota pura de referencia (interés + amort, sin seguro) — solo informativa
+  S.cp_orig = S.cuota_total - S.capital * S.tasa_seguro; // aproximación mes 1
 
-  // Calcular saldo tras cuota N
-  saldo = S.capital;
+  // Calcular saldo y acumulados tras cuota N (modelo correcto)
+  let saldo = S.capital;
   let tot_int_pre = 0, tot_seg_pre = 0;
   for(let i = 0; i < S.cuota_desde; i++){
-    const int_i = saldo * S.tem;
-    const seg_i = saldo * S.tasa_seguro;
+    const int_i   = saldo * S.tem;
+    const seg_i   = saldo * S.tasa_seguro;
+    const amort_i = S.cuota_total - int_i - seg_i;
     tot_int_pre += int_i;
     tot_seg_pre += seg_i;
-    saldo -= (S.cp_orig - int_i);
+    saldo -= amort_i;
     if(saldo < 0.005) saldo = 0;
   }
   S.saldo_cN    = saldo;
@@ -515,17 +587,13 @@ function validateStep1(){
   S.tot_int_pre = tot_int_pre;
   S.tot_seg_pre = tot_seg_pre;
 
-  const diff = Math.abs(S.cp_orig - (S.cuota_total - S.capital * S.tasa_seguro));
-  const msg = `Cuota pura calculada: ${fmt(S.cp_orig)} | TEM: ${(S.tem*100).toFixed(4)}% | Saldo tras cuota ${S.cuota_desde}: ${fmt(S.saldo_cN)}`;
+  const msg = `Tasa seguro mensual: ${(S.tasa_seguro*100).toFixed(4)}% | TEM: ${(S.tem*100).toFixed(4)}% | Saldo tras cuota ${S.cuota_desde}: ${fmt(S.saldo_cN)}`;
   showPreview(msg, 'info');
 
-  // Setup step 2 sliders
   const Z = parseFloat(document.getElementById('monto_Z').value) || 0;
   if(Z > 0) setupSliders(Z);
 
-  setTimeout(() => {
-    goStep(2);
-  }, 200);
+  setTimeout(() => { goStep(2); }, 200);
 }
 
 function showPreview(msg, type='info'){
@@ -541,7 +609,6 @@ function showPreview(msg, type='info'){
 function onZChange(){
   const Z = parseFloat(document.getElementById('monto_Z').value) || 0;
   setupSliders(Z);
-  // warn if Z > saldo
   const warn = document.getElementById('z-warning');
   if(Z > S.saldo_cN && S.saldo_cN > 0){
     warn.textContent = `Atención: el monto Z (${fmt(Z)}) supera el saldo pendiente (${fmt(S.saldo_cN)}). Ajusta el monto.`;
@@ -573,17 +640,14 @@ function updateSliderDisplay(Z, x){
   document.getElementById('sv-x').textContent = fmt(x);
   document.getElementById('sv-y').textContent = fmt(y);
   const tot = document.getElementById('sl-total');
-  const sum = x + y;
-  tot.textContent = `Total distribuido: ${fmt(sum)} de ${fmt(Z)}`;
-  tot.className = 'slider-total ' + (Math.abs(sum - Z) < 1 ? 'ok' : 'warn');
+  tot.textContent = `Total distribuido: ${fmt(x+y)} de ${fmt(Z)}`;
+  tot.className = 'slider-total ' + (Math.abs((x+y) - Z) < 1 ? 'ok' : 'warn');
   document.getElementById('optimo-result').classList.add('hidden');
 }
 function syncSliders(){
   const Z = parseFloat(document.getElementById('monto_Z').value)||0;
   if(Z > 0) setupSliders(Z);
 }
-
-// PREF BUTTONS
 function setPref(p){
   S.pref = p;
   ['ahorro','equilibrio','cuota'].forEach(k => {
@@ -598,29 +662,24 @@ function calcOptimo(){
   const Z = parseFloat(document.getElementById('monto_Z').value)||0;
   const dcMin = parseFloat(document.getElementById('dc_min').value)||0;
   if(Z <= 0 || S.saldo_cN <= 0){ alert('Primero completa los datos del préstamo.'); return; }
-
   const tipo = document.querySelector('input[name=tipo]:checked').value;
   const resultados = [];
   const paso = Math.max(500, Math.round(Z/80/500)*500);
-
   for(let x = 0; x <= Z; x += paso){
     const y = Z - x;
-    // Para mixto_cuota_tiempo: el slider X es la parte "cuota" y slider Y es "tiempo"
-    // Pero en el optimizador siempre llamamos simMixto(X_tiempo, Y_cuota, orden)
-    const r = (tipo === 'mixto_cuota_tiempo')
-      ? simMixto(x, y, 'cuota_tiempo')   // x=reduce tiempo en este contexto
-      : simMixto(x, y, 'tiempo_cuota');
+    const orden = tipo === 'mixto_cuota_tiempo' ? 'cuota_tiempo' : 'tiempo_cuota';
+    const r = simTodo(orden, x, y);
     if(r) resultados.push(r);
   }
-
   const cands = resultados.filter(r => r.dc >= dcMin);
-  if(!cands.length){ document.getElementById('optimo-result').innerHTML = '<div class="alert warn">No hay combinaciones que cumplan el mínimo de bajada de cuota especificado.</div>'; document.getElementById('optimo-result').classList.remove('hidden'); return; }
-
+  if(!cands.length){
+    document.getElementById('optimo-result').innerHTML = '<div class="alert warn">No hay combinaciones que cumplan el mínimo de bajada de cuota especificado.</div>';
+    document.getElementById('optimo-result').classList.remove('hidden'); return;
+  }
   const ahMin = Math.min(...cands.map(r=>r.ahorro));
   const ahMax = Math.max(...cands.map(r=>r.ahorro));
   const dcMin2= Math.min(...cands.map(r=>r.dc));
   const dcMax = Math.max(...cands.map(r=>r.dc));
-
   let best;
   if(S.pref === 'ahorro'){
     best = cands.reduce((a,b) => a.ahorro >= b.ahorro ? a : b);
@@ -628,173 +687,198 @@ function calcOptimo(){
     best = cands.reduce((a,b) => a.dc >= b.dc ? a : b);
   } else {
     cands.forEach(r => {
-      const ahn = ahMax > ahMin ? (r.ahorro - ahMin)/(ahMax - ahMin) : 1;
-      const dcn = dcMax > dcMin2 ? (r.dc - dcMin2)/(dcMax - dcMin2) : 1;
+      const ahn = ahMax>ahMin ? (r.ahorro-ahMin)/(ahMax-ahMin) : 1;
+      const dcn = dcMax>dcMin2 ? (r.dc-dcMin2)/(dcMax-dcMin2) : 1;
       r.score = 0.5*ahn + 0.5*dcn;
     });
-    best = cands.reduce((a,b) => a.score >= b.score ? a : b);
+    best = cands.reduce((a,b) => (a.score||0) >= (b.score||0) ? a : b);
   }
-
-  // Aplicar al slider
   document.getElementById('slider-x').value = best.X;
   document.getElementById('slider-y').value = best.Y;
   updateSliderDisplay(Z, best.X);
-
   const el = document.getElementById('optimo-result');
   el.innerHTML = `<div class="alert success">
-    <strong>Óptimo calculado:</strong> X = ${fmt(best.X)} (tiempo) · Y = ${fmt(best.Y)} (cuota)<br>
-    Ahorro estimado: ${fmt(best.ahorro)} · Meses: ${best.n_total} · Cuota nueva ≈ ${fmt(best.cuota_disp)} (↓${fmt(best.dc)})
-    ${S.pref==='equilibrio' ? ' · Score equilibrio: '+(best.score||0).toFixed(4) : ''}
+    <strong>Óptimo calculado:</strong> X = ${fmt(best.X)} · Y = ${fmt(best.Y)}<br>
+    Ahorro estimado: ${fmt(best.ahorro)} · Meses: ${best.n_total} · Cuota: ${fmt(best.cuota_disp)} (↓${fmt(best.dc)})
+    ${S.pref==='equilibrio' ? ' · Score: '+(best.score||0).toFixed(4) : ''}
   </div>`;
   el.classList.remove('hidden');
 }
 
 // ════════════════════════════════════════════════════════════════
-// SIMULACIÓN CENTRAL
+// SIMULACIÓN CENTRAL — modelo correcto: cuota total FIJA
+// amort_i = cuota_total - interés_i - seguro_i  (seguro sobre saldo)
 // ════════════════════════════════════════════════════════════════
 function simTodo(tipoSim, X, Y){
-  // tipoSim: 'tiempo' | 'cuota' | 'cuota_tiempo' | 'tiempo_cuota'
-  // X = parte que reduce tiempo, Y = parte que reduce cuota
-  const tem = S.tem;
-  const cp0 = S.cp_orig;
-  let ti = S.tot_int_pre, ts = S.tot_seg_pre;
+  const tem    = S.tem;
+  const ts     = S.tasa_seguro;
+  const ctot   = S.cuota_total;   // cuota total fija
+  let ti = S.tot_int_pre, tseg = S.tot_seg_pre;
   let saldo = S.saldo_cN;
   const n_rest = S.n_rest;
 
-  let cp_final, n_final, saldo_ini_bloque;
+  let n_final, saldo_ini_bloque, cuota_final;
 
   if(tipoSim === 'tiempo'){
-    // Todo a reducir tiempo: cuota = cp0, calcular nuevo n
-    saldo -= X; if(saldo <= 0) return null;
-    const nN = nuevoN(saldo, cp0, tem); if(!nN) return null;
-    cp_final = cp0; n_final = nN; saldo_ini_bloque = saldo;
+    // Amortiza Z → reduce tiempo, cuota_total INAMOVIBLE
+    saldo -= X; if(saldo <= 0.005) return null;
+    const nN = nuevoN_conSeguro(saldo, ctot, tem, ts);
+    if(!nN) return null;
+    n_final = nN; saldo_ini_bloque = saldo; cuota_final = ctot;
 
   } else if(tipoSim === 'cuota'){
-    // Todo a reducir cuota: n = n_rest, calcular nueva cuota
-    saldo -= Y; if(saldo <= 0) return null;
-    cp_final = cuotaPura(saldo, n_rest, tem);
-    n_final = n_rest; saldo_ini_bloque = saldo;
+    // Amortiza Z → reduce cuota, n_rest fijo
+    // Nueva cuota total: resolver para que el préstamo liquide en n_rest meses
+    saldo -= Y; if(saldo <= 0.005) return null;
+    const nuevaCuota = nuevaCuotaParaN(saldo, n_rest, tem, ts);
+    if(!nuevaCuota) return null;
+    n_final = n_rest; saldo_ini_bloque = saldo; cuota_final = nuevaCuota;
 
   } else if(tipoSim === 'cuota_tiempo'){
-    // Orden: cuota primero (Y), luego tiempo (X)
-    saldo -= Y; if(saldo <= 0) return null;
-    const cp_b = cuotaPura(saldo, n_rest, tem);
-    saldo -= X; if(saldo <= 0) return null;
-    const nN = nuevoN(saldo, cp_b, tem); if(!nN) return null;
-    cp_final = cp_b; n_final = nN; saldo_ini_bloque = saldo;
+    // Orden: cuota primero (Y), luego tiempo (X) — mejor ahorro demostrado
+    saldo -= Y; if(saldo <= 0.005) return null;
+    const cuota_b = nuevaCuotaParaN(saldo, n_rest, tem, ts);
+    if(!cuota_b) return null;
+    saldo -= X; if(saldo <= 0.005) return null;
+    const nN = nuevoN_conSeguro(saldo, cuota_b, tem, ts);
+    if(!nN) return null;
+    n_final = nN; saldo_ini_bloque = saldo; cuota_final = cuota_b;
 
   } else { // tiempo_cuota
     // Orden: tiempo primero (X), luego cuota (Y)
-    saldo -= X; if(saldo <= 0) return null;
-    const nN = nuevoN(saldo, cp0, tem); if(!nN) return null;
-    saldo -= Y; if(saldo <= 0) return null;
-    cp_final = cuotaPura(saldo, nN, tem);
-    n_final = nN; saldo_ini_bloque = saldo;
+    saldo -= X; if(saldo <= 0.005) return null;
+    const nN = nuevoN_conSeguro(saldo, ctot, tem, ts);
+    if(!nN) return null;
+    saldo -= Y; if(saldo <= 0.005) return null;
+    const nuevaCuota = nuevaCuotaParaN(saldo, nN, tem, ts);
+    if(!nuevaCuota) return null;
+    n_final = nN; saldo_ini_bloque = saldo; cuota_final = nuevaCuota;
   }
 
-  // Simular
+  // Simular bloque restante acumulando intereses y seguro
   let s = saldo_ini_bloque;
   for(let i = 0; i < n_final; i++){
-    ti += s * tem;
-    ts += s * S.tasa_seguro;
-    s -= (cp_final - s * tem);
+    const int_i   = s * tem;
+    const seg_i   = s * ts;
+    ti   += int_i;
+    tseg += seg_i;
+    s    -= (cuota_final - int_i - seg_i);
     if(s < 0.005) s = 0;
   }
 
-  const n_total = S.cuota_desde + n_final;
-  const seg_orig = S.seguro_total;
-  const ahorro_int = (S.intereses_orig > 0) ? S.intereses_orig - ti : null;
-  const ahorro_seg = seg_orig - ts;
-  const ahorro_tot = (S.intereses_orig > 0 && seg_orig > 0) ? (S.intereses_orig + seg_orig) - (ti + ts) : null;
+  const n_total    = S.cuota_desde + n_final;
+  const ahorro_int = S.intereses_orig > 0 ? S.intereses_orig - ti : null;
+  const ahorro_seg = S.seguro_total - tseg;
+  const ahorro_tot = (S.intereses_orig > 0 && S.seguro_total > 0)
+                     ? (S.intereses_orig + S.seguro_total) - (ti + tseg) : null;
 
-  // Para "reducir tiempo": la cuota PURA es inamovible (= cp_orig).
-  // El seguro baja porque el saldo baja, pero eso no es "bajada de cuota".
-  // dc = 0 para que quede claro que la cuota no cambió.
-  let cuota_disp, dc;
-  if(tipoSim === 'tiempo'){
-    cuota_disp = S.cuota_total;
-    dc = 0;
-  } else {
-    cuota_disp = cp_final + saldo_ini_bloque * S.tasa_seguro;
-    dc = S.cuota_total - cuota_disp;
-  }
+  // Para "reducir tiempo": cuota es inamovible = cuota_total original
+  // dc = 0 (no bajó la cuota)
+  const cuota_disp = cuota_final;
+  const dc = S.cuota_total - cuota_disp;
 
   return {
     tipo: tipoSim, X, Y,
-    tot_int: ti, tot_seg: ts,
+    tot_int: ti, tot_seg: tseg,
     ahorro_int, ahorro_seg, ahorro: ahorro_tot,
     n_total, meses_menos: S.plazo - n_total,
-    cp: cp_final, cuota_disp,
-    dc,
+    cuota_disp, dc,
     saldo_ini_bloque
   };
+}
+
+// Calcula nueva cuota total para que el préstamo liquide en exactamente n meses
+// con cuota total fija (incluye seguro variable sobre saldo)
+function nuevaCuotaParaN(saldo_ini, n, tem, ts){
+  if(saldo_ini <= 0 || n <= 0) return null;
+  // Búsqueda binaria: cuota más baja que liquida el saldo en <= n meses
+  const ctot_min = saldo_ini * (tem + ts) * 1.0001; // mínimo para cubrir int+seg
+  let lo = ctot_min, hi = saldo_ini; // máximo absurdo
+  for(let iter = 0; iter < 80; iter++){
+    const mid = (lo + hi) / 2;
+    let s = saldo_ini;
+    for(let i = 0; i < n; i++){
+      const int_i = s * tem;
+      const seg_i = s * ts;
+      s -= (mid - int_i - seg_i);
+      if(s < 0.005){ s = 0; break; }
+    }
+    if(s > 0.005) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
 }
 
 function simMixto(X, Y, orden){ return simTodo(orden, X, Y); }
 
 // ════════════════════════════════════════════════════════════════
-// CRONOGRAMA COMPLETO
+// CRONOGRAMA COMPLETO — cuota total FIJA
 // ════════════════════════════════════════════════════════════════
 function buildCronograma(tipoSim, X, Y){
-  const tem = S.tem; const cp0 = S.cp_orig;
+  const tem = S.tem;
+  const ts  = S.tasa_seguro;
   const rows = [];
   let saldo = S.capital;
-  let cp_final, n_final, saldo_ini_bloque, n_rest = S.n_rest;
+  let n_final, saldo_ini_bloque, cuota_final;
+  const n_rest = S.n_rest;
+  const ctot = S.cuota_total;
 
-  // Cuotas previas a la amortización
+  // ── Cuotas previas a la amortización ──────────────────────────
   for(let i = 1; i <= S.cuota_desde; i++){
-    const int_i = saldo * tem;
-    const seg_i = saldo * S.tasa_seguro;
-    const amort_i = cp0 - int_i;
-    const cuota_i = cp0 + seg_i;
-    rows.push({ mes: i, saldo_ini: saldo, interes: int_i, amort: amort_i, seguro: seg_i, cuota: cuota_i, saldo_fin: saldo - amort_i, tipo_row: 'normal' });
+    const int_i   = saldo * tem;
+    const seg_i   = saldo * ts;
+    const amort_i = ctot - int_i - seg_i;
+    rows.push({ mes: i, saldo_ini: saldo, interes: int_i, amort: amort_i,
+                seguro: seg_i, cuota: ctot, saldo_fin: saldo - amort_i, tipo_row: 'normal' });
     saldo -= amort_i;
     if(saldo < 0.005) saldo = 0;
   }
 
-  // AMORTIZACIONES
+  // ── Amortizaciones ────────────────────────────────────────────
   let amort_events = [];
-  let cp_temp = cp0;
 
   if(tipoSim === 'tiempo'){
     amort_events.push({ label: 'Amortización extraordinaria (reduce tiempo)', monto: X });
-    saldo -= X; cp_final = cp0;
-    const nN = nuevoN(saldo, cp0, tem);
-    n_final = nN; saldo_ini_bloque = saldo;
+    saldo -= X;
+    n_final = nuevoN_conSeguro(saldo, ctot, tem, ts);
+    saldo_ini_bloque = saldo; cuota_final = ctot;
+
   } else if(tipoSim === 'cuota'){
     amort_events.push({ label: 'Amortización extraordinaria (reduce cuota)', monto: Y });
     saldo -= Y;
-    cp_final = cuotaPura(saldo, n_rest, tem);
+    cuota_final = nuevaCuotaParaN(saldo, n_rest, tem, ts);
     n_final = n_rest; saldo_ini_bloque = saldo;
+
   } else if(tipoSim === 'cuota_tiempo'){
     amort_events.push({ label: 'Amortización 1 — reduce cuota (Y)', monto: Y });
     amort_events.push({ label: 'Amortización 2 — reduce tiempo (X)', monto: X });
-    saldo -= Y; cp_temp = cuotaPura(saldo, n_rest, tem);
+    saldo -= Y;
+    const cuota_b = nuevaCuotaParaN(saldo, n_rest, tem, ts);
     saldo -= X;
-    const nN = nuevoN(saldo, cp_temp, tem);
-    cp_final = cp_temp; n_final = nN; saldo_ini_bloque = saldo;
-  } else {
+    n_final = nuevoN_conSeguro(saldo, cuota_b, tem, ts);
+    saldo_ini_bloque = saldo; cuota_final = cuota_b;
+
+  } else { // tiempo_cuota
     amort_events.push({ label: 'Amortización 1 — reduce tiempo (X)', monto: X });
     amort_events.push({ label: 'Amortización 2 — reduce cuota (Y)', monto: Y });
     saldo -= X;
-    const nN = nuevoN(saldo, cp0, tem);
+    const nN = nuevoN_conSeguro(saldo, ctot, tem, ts);
     saldo -= Y;
-    cp_final = cuotaPura(saldo, nN, tem);
+    cuota_final = nuevaCuotaParaN(saldo, nN, tem, ts);
     n_final = nN; saldo_ini_bloque = saldo;
   }
 
   amort_events.forEach(e => rows.push({ tipo_row: 'amort', label: e.label, monto: e.monto }));
 
-  // Cuotas restantes
+  // ── Cuotas restantes ──────────────────────────────────────────
   saldo = saldo_ini_bloque;
   for(let i = 0; i < n_final; i++){
-    const mes = S.cuota_desde + 1 + i;
-    const int_i = saldo * tem;
-    const seg_i = saldo * S.tasa_seguro;
-    const amort_i = cp_final - int_i;
-    const cuota_i = cp_final + seg_i;
-    const sf = saldo - amort_i;
-    rows.push({ mes, saldo_ini: saldo, interes: int_i, amort: amort_i, seguro: seg_i, cuota: cuota_i, saldo_fin: Math.max(0, sf), tipo_row: 'normal' });
+    const mes     = S.cuota_desde + 1 + i;
+    const int_i   = saldo * tem;
+    const seg_i   = saldo * ts;
+    const amort_i = cuota_final - int_i - seg_i;
+    const sf      = saldo - amort_i;
+    rows.push({ mes, saldo_ini: saldo, interes: int_i, amort: amort_i,
+                seguro: seg_i, cuota: cuota_final, saldo_fin: Math.max(0, sf), tipo_row: 'normal' });
     saldo = Math.max(0, sf);
   }
   return rows;
@@ -816,13 +900,8 @@ function calcular(){
   if(S.tipo.startsWith('mixto')){
     const xv = parseFloat(document.getElementById('slider-x').value)||0;
     const yv = parseFloat(document.getElementById('slider-y').value)||0;
-    // Según el orden seleccionado, el slider-x puede ser "tiempo" o "cuota"
-    if(S.tipo === 'mixto_cuota_tiempo'){
-      // slider-x = cuota (Y), slider-y = tiempo (X) — label fue cambiado
-      Y = xv; X = yv;
-    } else {
-      X = xv; Y = yv;
-    }
+    if(S.tipo === 'mixto_cuota_tiempo'){ Y = xv; X = yv; }
+    else { X = xv; Y = yv; }
   } else if(S.tipo === 'cuota'){
     X = 0; Y = Z;
   }
@@ -841,26 +920,31 @@ function calcular(){
 // RENDER RESULTADOS
 // ════════════════════════════════════════════════════════════════
 function renderResultados(res, crono, X, Y){
-  // Alert
   const alert_el = document.getElementById('result-alert');
-  const label_tipo = { tiempo:'Todo a reducir tiempo', cuota:'Todo a reducir cuota', cuota_tiempo:'Mixto: cuota → tiempo', tiempo_cuota:'Mixto: tiempo → cuota' };
+  const label_tipo = { tiempo:'Todo a reducir tiempo', cuota:'Todo a reducir cuota',
+                       cuota_tiempo:'Mixto: cuota → tiempo', tiempo_cuota:'Mixto: tiempo → cuota' };
   alert_el.innerHTML = `<strong>${label_tipo[res.tipo]}</strong> · Z = ${fmt(S.monto_Z)} ${res.tipo.startsWith('cuota_tiempo')||res.tipo.startsWith('tiempo_cuota') ? `(X=${fmt(X)}, Y=${fmt(Y)})` : ''}`;
   alert_el.classList.remove('hidden');
 
-  // Metrics
   const grid = document.getElementById('results-grid');
   const metrics = [
-    { label:'Meses restantes', val: res.n_total, sub: `Reducción: -${res.meses_menos} meses`, cls: res.meses_menos > 0 ? 'green' : '', highlight: res.meses_menos > 0 },
-    { label: res.tipo === 'tiempo' ? 'Cuota mensual' : 'Cuota nueva (aprox.)',
-      val: res.tipo === 'tiempo' ? fmt(res.cuota_disp) : fmt(res.cuota_disp),
+    { label:'Meses totales del préstamo', val: res.n_total,
+      sub: `Reducción: -${res.meses_menos} meses respecto al plazo original`,
+      cls: res.meses_menos > 0 ? 'green' : '', highlight: res.meses_menos > 0 },
+    { label: res.tipo === 'tiempo' ? 'Cuota mensual (inamovible)' : 'Cuota mensual nueva',
+      val: fmt(res.cuota_disp),
       sub: res.tipo === 'tiempo'
-        ? `Inamovible — cuota pura: ${fmt(res.cp)} (no cambia al reducir tiempo)`
-        : `Antes: ${fmt(S.cuota_total)} · Baja: ${fmt(res.dc)}`,
-      cls: res.tipo === 'tiempo' ? 'amber' : (res.dc > 0 ? 'green' : '') },
-    { label:'Total intereses', val: fmt(res.tot_int), sub: S.intereses_orig > 0 ? `Antes: ${fmt(S.intereses_orig)}` : '', cls:'' },
-    { label:'Total seguro', val: fmt(res.tot_seg), sub: S.seguro_total > 0 ? `Antes: ${fmt(S.seguro_total)}` : '', cls:'' },
-    { label:'Ahorro en intereses', val: res.ahorro_int !== null ? fmt(res.ahorro_int) : '—', sub:'Reducción directa de intereses', cls:'green', highlight: true },
-    { label:'Ahorro total (int + seg)', val: res.ahorro !== null ? fmt(res.ahorro) : '—', sub:'Intereses + seguro ahorrado', cls:'green', highlight: res.ahorro > 0 },
+        ? `Sin cambio — permanece exactamente igual que antes`
+        : `Antes: ${fmt(S.cuota_total)} · Ahorro mensual: ${fmt(res.dc)}`,
+      cls: res.tipo === 'tiempo' ? '' : (res.dc > 0 ? 'green' : '') },
+    { label:'Total intereses pagados', val: fmt(res.tot_int),
+      sub: S.intereses_orig > 0 ? `Original: ${fmt(S.intereses_orig)}` : '', cls:'' },
+    { label:'Total seguro pagado', val: fmt(res.tot_seg),
+      sub: S.seguro_total > 0 ? `Original: ${fmt(S.seguro_total)}` : '', cls:'' },
+    { label:'Ahorro en intereses', val: res.ahorro_int !== null ? fmt(res.ahorro_int) : '—',
+      sub:'Intereses que ya no pagarás', cls:'green', highlight: true },
+    { label:'Ahorro total (int + seg)', val: res.ahorro !== null ? fmt(res.ahorro) : '—',
+      sub:'Intereses + seguro ahorrado', cls:'green', highlight: res.ahorro > 0 },
   ];
   grid.innerHTML = metrics.map(m => `
     <div class="metric ${m.highlight?'highlight':''}">
@@ -869,22 +953,17 @@ function renderResultados(res, crono, X, Y){
       <div class="m-sub">${m.sub||''}</div>
     </div>`).join('');
 
-  // Bar chart
   if(S.intereses_orig > 0){
     const barEl = document.getElementById('compare-bar');
-    const maxV = S.intereses_orig + S.seguro_total;
+    const maxV  = S.intereses_orig + S.seguro_total;
     const after = res.tot_int + res.tot_seg;
     barEl.innerHTML = `
-      <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:10px">Comparación visual</div>
-      ${barRow('Sin amortizar', S.intereses_orig + S.seguro_total, maxV, 'blue')}
-      ${barRow('Con amortización', after, maxV, 'green')}
-    `;
+      <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:10px">Comparación visual del costo total</div>
+      ${barRow('Sin amortizar', maxV, maxV, 'blue')}
+      ${barRow('Con amortización', after, maxV, 'green')}`;
   }
 
-  // CRONOGRAMA
   renderCronograma(crono);
-
-  // COMPARATIVO
   renderComparativo(res, X, Y);
 }
 
@@ -899,9 +978,14 @@ function barRow(label, val, max, cls){
 
 function renderCronograma(crono){
   const table = document.getElementById('crono-table');
-  let thead = `<thead><tr>
-    <th>Cuota</th><th style="text-align:left">Saldo inicial</th>
-    <th>Interés</th><th>Amortización</th><th>Seguro</th><th>Cuota total</th><th>Saldo final</th>
+  const thead = `<thead><tr>
+    <th>N°</th>
+    <th style="text-align:left">Saldo inicial</th>
+    <th>Interés</th>
+    <th>Amortización</th>
+    <th>Seguro</th>
+    <th>Cuota total</th>
+    <th>Saldo final</th>
   </tr></thead>`;
   let tbody = '<tbody>';
   let tot_int=0, tot_amort=0, tot_seg=0, tot_cuota=0;
@@ -911,7 +995,10 @@ function renderCronograma(crono){
       tbody += `<tr class="amort-row"><td colspan="7" style="text-align:left;font-size:11px;padding:8px 10px">
         ⚡ ${r.label} — ${fmt(r.monto)}</td></tr>`;
     } else {
-      tot_int += r.interes; tot_amort += r.amort; tot_seg += r.seguro; tot_cuota += r.cuota;
+      tot_int   += r.interes;
+      tot_amort += r.amort;
+      tot_seg   += r.seguro;
+      tot_cuota += r.cuota;
       tbody += `<tr>
         <td>${r.mes}</td>
         <td style="text-align:left">${fmt(r.saldo_ini)}</td>
@@ -923,49 +1010,58 @@ function renderCronograma(crono){
       </tr>`;
     }
   });
-  tbody += `</tbody>`;
-  let tfoot = `<tfoot><tr>
+  tbody += '</tbody>';
+  const tfoot = `<tfoot><tr>
     <td>Total</td><td></td>
-    <td>${fmt(tot_int)}</td><td>${fmt(tot_amort)}</td>
-    <td>${fmt(tot_seg)}</td><td>${fmt(tot_cuota)}</td><td></td>
+    <td>${fmt(tot_int)}</td>
+    <td>${fmt(tot_amort)}</td>
+    <td>${fmt(tot_seg)}</td>
+    <td>${fmt(tot_cuota)}</td>
+    <td></td>
   </tr></tfoot>`;
   table.innerHTML = thead + tbody + tfoot;
 }
 
 function renderComparativo(res, X, Y){
   const el = document.getElementById('comparativo-content');
-  if(S.intereses_orig <= 0){ el.innerHTML = '<div class="alert info">Ingresa el total de intereses originales para ver el comparativo completo.</div>'; return; }
+  if(S.intereses_orig <= 0){
+    el.innerHTML = '<div class="alert info">Ingresa el total de intereses originales para ver el comparativo completo.</div>';
+    return;
+  }
+  const Z = S.monto_Z;
+  const scenarios = [
+    { tipo:'tiempo',      label:'Todo a tiempo (máx. ahorro)', xi: Z, yi: 0 },
+    { tipo:'cuota',       label:'Todo a cuota (máx. bajada cuota)', xi: 0, yi: Z },
+    { tipo: res.tipo,     label:'Tu elección actual', xi: X, yi: Y, current: true },
+  ];
+  // deduplicar por tipo
+  const seen = new Set();
+  const unique = scenarios.filter(s => { if(seen.has(s.tipo)) return false; seen.add(s.tipo); return true; });
 
-  const rows_comp = [
-    ['tiempo','Todo a tiempo (máx. ahorro)', X+Y, 0],
-    ['cuota','Todo a cuota (máx. bajada cuota)', 0, X+Y],
-    [res.tipo, 'Tu elección actual', X, Y],
-  ].filter((v,i,a) => a.findIndex(b=>b[0]===v[0])===i);
+  let html = `<div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:14px">Comparativo de escenarios</div>
+  <table style="width:100%;border-collapse:collapse;font-size:12px">
+  <thead><tr style="border-bottom:1.5px solid var(--border)">
+    <th style="text-align:left;padding:6px 8px;font-size:11px;color:var(--text3)">Escenario</th>
+    <th style="text-align:right;padding:6px 8px;font-size:11px;color:var(--text3)">Ahorro total</th>
+    <th style="text-align:right;padding:6px 8px;font-size:11px;color:var(--text3)">Meses</th>
+    <th style="text-align:right;padding:6px 8px;font-size:11px;color:var(--text3)">Cuota</th>
+    <th style="text-align:right;padding:6px 8px;font-size:11px;color:var(--text3)">↓ Cuota</th>
+  </tr></thead><tbody>`;
 
-  let html = `<div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:14px">Comparativo de escenarios</div>`;
-  html += `<table style="width:100%;border-collapse:collapse;font-size:12px">
-    <thead><tr style="border-bottom:1.5px solid var(--border)">
-      <th style="text-align:left;padding:6px 8px;font-size:11px;color:var(--text3)">Escenario</th>
-      <th style="text-align:right;padding:6px 8px;font-size:11px;color:var(--text3)">Ahorro total</th>
-      <th style="text-align:right;padding:6px 8px;font-size:11px;color:var(--text3)">Meses totales</th>
-      <th style="text-align:right;padding:6px 8px;font-size:11px;color:var(--text3)">Cuota nueva</th>
-      <th style="text-align:right;padding:6px 8px;font-size:11px;color:var(--text3)">↓ Cuota</th>
-    </tr></thead><tbody>`;
-
-  rows_comp.forEach(([tipo, label, xi, yi]) => {
-    const tipoSim = tipo.replace('mixto_','');
-    const r = simTodo(tipoSim, xi, yi);
+  unique.forEach(sc => {
+    const r = simTodo(sc.tipo, sc.xi, sc.yi);
     if(!r) return;
-    const isCurrent = tipo === res.tipo;
-    html += `<tr style="${isCurrent?'background:var(--accent-light);font-weight:500':''}">
-      <td style="padding:7px 8px;border-bottom:1px solid var(--border)">${label}${isCurrent?' <span class="tag green">actual</span>':''}</td>
+    const bg = sc.current ? 'background:var(--accent-light);font-weight:500' : '';
+    const dcStr = r.dc > 0.5 ? '-'+fmt(r.dc) : '—';
+    html += `<tr style="${bg}">
+      <td style="padding:7px 8px;border-bottom:1px solid var(--border)">${sc.label}${sc.current?' <span class="tag green">actual</span>':''}</td>
       <td style="padding:7px 8px;border-bottom:1px solid var(--border);text-align:right;font-family:'DM Mono',monospace;color:var(--accent)">${r.ahorro!==null?fmt(r.ahorro):'—'}</td>
       <td style="padding:7px 8px;border-bottom:1px solid var(--border);text-align:right;font-family:'DM Mono',monospace">${r.n_total}</td>
       <td style="padding:7px 8px;border-bottom:1px solid var(--border);text-align:right;font-family:'DM Mono',monospace">${fmt(r.cuota_disp)}</td>
-      <td style="padding:7px 8px;border-bottom:1px solid var(--border);text-align:right;font-family:'DM Mono',monospace;color:${r.dc>0?'var(--accent)':'var(--text2)'}">${r.dc>0?'-'+fmt(r.dc):'—'}</td>
+      <td style="padding:7px 8px;border-bottom:1px solid var(--border);text-align:right;font-family:'DM Mono',monospace;color:${r.dc>0.5?'var(--accent)':'var(--text2)'}">${dcStr}</td>
     </tr>`;
   });
-  html += `</tbody></table>`;
+  html += '</tbody></table>';
   el.innerHTML = html;
 }
 
@@ -979,6 +1075,38 @@ function showTab(name){
   });
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
+}
+
+// ════════════════════════════════════════════════════════════════
+// TOGGLE PLAZO: MESES vs FECHAS
+// ════════════════════════════════════════════════════════════════
+function switchPlazo(modo){
+  const esFechas = modo === 'fechas';
+  document.getElementById('toggle-meses').classList.toggle('active', !esFechas);
+  document.getElementById('toggle-fechas').classList.toggle('active', esFechas);
+  document.getElementById('plazo-meses-wrap').classList.toggle('hidden', esFechas);
+  document.getElementById('plazo-fechas-wrap').classList.toggle('visible', esFechas);
+  document.getElementById('plazo-calculado').textContent = '';
+}
+
+function calcularPlazoFechas(){
+  const ini = document.getElementById('fecha_inicio').value;
+  const fin = document.getElementById('fecha_fin').value;
+  const el  = document.getElementById('plazo-calculado');
+  if(!ini || !fin){ el.textContent = ''; return 0; }
+  const [yI, mI] = ini.split('-').map(Number);
+  const [yF, mF] = fin.split('-').map(Number);
+  const meses = (yF - yI) * 12 + (mF - mI) + 1;
+  if(meses < 1){
+    el.textContent = '⚠ La fecha de término debe ser posterior a la de inicio';
+    el.style.color = 'var(--warn)';
+    document.getElementById('plazo').value = '';
+    return 0;
+  }
+  el.style.color = 'var(--accent)';
+  el.textContent = `Plazo calculado: ${meses} meses`;
+  document.getElementById('plazo').value = meses;
+  return meses;
 }
 
 // Init
