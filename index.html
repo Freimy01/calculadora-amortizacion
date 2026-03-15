@@ -663,51 +663,104 @@ function setPref(p){
 }
 
 // ════════════════════════════════════════════════════════════════
-// OPTIMIZADOR
+// OPTIMIZADOR — lógica corregida por preferencia
 // ════════════════════════════════════════════════════════════════
 function calcOptimo(){
-  const Z = parseFloat(document.getElementById('monto_Z').value)||0;
-  const dcMin = parseFloat(document.getElementById('dc_min').value)||0;
+  const Z      = parseFloat(document.getElementById('monto_Z').value)||0;
+  const dcMinManual = parseFloat(document.getElementById('dc_min').value)||0;
   if(Z <= 0 || S.saldo_cN <= 0){ alert('Primero completa los datos del préstamo.'); return; }
-  const tipo = document.querySelector('input[name=tipo]:checked').value;
+
+  const tipo  = document.querySelector('input[name=tipo]:checked').value;
+  const orden = tipo === 'mixto_cuota_tiempo' ? 'cuota_tiempo' : 'tiempo_cuota';
+  const pref  = S.pref || 'equilibrio';
+
+  // ── Caso simple: preferencia pura ──────────────────────────────
+  // "Maximizar ahorro" = todo a tiempo  → X=Z, Y=0
+  // "Bajar cuota máx." = todo a cuota   → X=0, Y=Z
+  if(pref === 'ahorro' && dcMinManual === 0){
+    aplicarOptimo(Z, 0, tipo, orden);
+    return;
+  }
+  if(pref === 'cuota' && dcMinManual === 0){
+    aplicarOptimo(0, Z, tipo, orden);
+    return;
+  }
+
+  // ── Construir tabla de resultados (paso 500) ────────────────────
+  const paso = Math.max(250, Math.round(Z/120/250)*250);
   const resultados = [];
-  const paso = Math.max(500, Math.round(Z/80/500)*500);
   for(let x = 0; x <= Z; x += paso){
     const y = Z - x;
-    const orden = tipo === 'mixto_cuota_tiempo' ? 'cuota_tiempo' : 'tiempo_cuota';
     const r = simTodo(orden, x, y);
     if(r) resultados.push(r);
   }
-  const cands = resultados.filter(r => r.dc >= dcMin);
-  if(!cands.length){
-    document.getElementById('optimo-result').innerHTML = '<div class="alert warn">No hay combinaciones que cumplan el mínimo de bajada de cuota especificado.</div>';
-    document.getElementById('optimo-result').classList.remove('hidden'); return;
+  if(!resultados.length){ alert('No se pudieron calcular resultados.'); return; }
+
+  // Bajada máxima posible (caso todo cuota, X=0)
+  const r_todo_cuota = simTodo(orden, 0, Z);
+  const dc_max_posible = r_todo_cuota ? r_todo_cuota.dc : Math.max(...resultados.map(r=>r.dc));
+
+  // ── Determinar umbral de bajada mínima ──────────────────────────
+  // Si el usuario puso un valor manual, se respeta.
+  // Si no, para "equilibrio" usamos 15% de la bajada máxima posible
+  // (garantiza que la cuota baje algo real, no solo S/ 5).
+  // Para "ahorro" con dc_min manual, se respeta ese filtro.
+  let dcUmbral;
+  if(dcMinManual > 0){
+    dcUmbral = dcMinManual;
+  } else if(pref === 'equilibrio'){
+    dcUmbral = dc_max_posible * 0.15;
+  } else {
+    dcUmbral = 0;
   }
-  const ahMin = Math.min(...cands.map(r=>r.ahorro));
-  const ahMax = Math.max(...cands.map(r=>r.ahorro));
-  const dcMin2= Math.min(...cands.map(r=>r.dc));
-  const dcMax = Math.max(...cands.map(r=>r.dc));
+
+  // ── Filtrar candidatos ──────────────────────────────────────────
+  const cands = resultados.filter(r => r.dc >= dcUmbral);
+  if(!cands.length){
+    document.getElementById('optimo-result').innerHTML =
+      `<div class="alert warn">No hay combinaciones que cumplan el mínimo de bajada de cuota
+       de ${fmt(dcUmbral)}. Intenta reducir el valor mínimo o cambia la preferencia.</div>`;
+    document.getElementById('optimo-result').classList.remove('hidden');
+    return;
+  }
+
+  // ── Elegir el mejor dentro de los candidatos ────────────────────
+  // Para "equilibrio" y "ahorro con filtro": maximizar ahorro (X ya es mayor)
+  // Para "cuota con filtro": maximizar bajada de cuota
   let best;
-  if(S.pref === 'ahorro'){
-    best = cands.reduce((a,b) => a.ahorro >= b.ahorro ? a : b);
-  } else if(S.pref === 'cuota'){
+  if(pref === 'cuota'){
     best = cands.reduce((a,b) => a.dc >= b.dc ? a : b);
   } else {
-    cands.forEach(r => {
-      const ahn = ahMax>ahMin ? (r.ahorro-ahMin)/(ahMax-ahMin) : 1;
-      const dcn = dcMax>dcMin2 ? (r.dc-dcMin2)/(dcMax-dcMin2) : 1;
-      r.score = 0.5*ahn + 0.5*dcn;
-    });
-    best = cands.reduce((a,b) => (a.score||0) >= (b.score||0) ? a : b);
+    // equilibrio y ahorro con filtro: maximizar ahorro dentro del umbral
+    best = cands.reduce((a,b) => a.ahorro >= b.ahorro ? a : b);
   }
-  document.getElementById('slider-x').value = best.X;
-  document.getElementById('slider-y').value = best.Y;
-  updateSliderDisplay(Z, best.X);
+
+  aplicarOptimo(best.X, best.Y, tipo, orden, best);
+}
+
+function aplicarOptimo(X, Y, tipo, orden, res){
+  // Si no se pasó resultado pre-calculado, calcularlo ahora
+  const r = res || simTodo(orden, X, Y);
+  if(!r){ alert('No se pudo calcular.'); return; }
+
+  // Escribir en sliders respetando la convención de cada modo
+  const Z = parseFloat(document.getElementById('monto_Z').value)||0;
+  if(tipo === 'mixto_cuota_tiempo'){
+    document.getElementById('slider-x').value = Y;  // slider-x = Y(cuota)
+    document.getElementById('slider-y').value = X;  // slider-y = X(tiempo)
+    updateSliderDisplay(Z, Y);
+  } else {
+    document.getElementById('slider-x').value = X;  // slider-x = X(tiempo)
+    document.getElementById('slider-y').value = Y;  // slider-y = Y(cuota)
+    updateSliderDisplay(Z, X);
+  }
+
   const el = document.getElementById('optimo-result');
+  const dc_str = r.dc > 0.5 ? `↓${fmt(r.dc)}` : 'inamovible';
+  const pref_label = {ahorro:'Maximizar ahorro', equilibrio:'Equilibrio', cuota:'Bajar cuota máx.'}[S.pref||'equilibrio'];
   el.innerHTML = `<div class="alert success">
-    <strong>Óptimo calculado:</strong> X = ${fmt(best.X)} · Y = ${fmt(best.Y)}<br>
-    Ahorro estimado: ${fmt(best.ahorro)} · Meses: ${best.n_total} · Cuota: ${fmt(best.cuota_disp)} (↓${fmt(best.dc)})
-    ${S.pref==='equilibrio' ? ' · Score: '+(best.score||0).toFixed(4) : ''}
+    <strong>Óptimo (${pref_label}):</strong> Reduce tiempo: ${fmt(X)} · Reduce cuota: ${fmt(Y)}<br>
+    Ahorro total: ${fmt(r.ahorro)} · Plazo: ${r.n_total} meses · Cuota: ${fmt(r.cuota_disp)} (${dc_str})
   </div>`;
   el.classList.remove('hidden');
 }
@@ -725,6 +778,10 @@ function simTodo(tipoSim, X, Y){
   const n_rest = S.n_rest;
 
   let n_final, saldo_ini_bloque, cuota_final;
+
+  // Colapsar modos mixtos a puro cuando uno de los montos es 0
+  if((tipoSim === 'cuota_tiempo' || tipoSim === 'tiempo_cuota') && Y === 0) tipoSim = 'tiempo';
+  if((tipoSim === 'cuota_tiempo' || tipoSim === 'tiempo_cuota') && X === 0) tipoSim = 'cuota';
 
   if(tipoSim === 'tiempo'){
     // Amortiza Z → reduce tiempo, cuota_total INAMOVIBLE
@@ -829,6 +886,10 @@ function buildCronograma(tipoSim, X, Y){
   let n_final, saldo_ini_bloque, cuota_final;
   const n_rest = S.n_rest;
   const ctot = S.cuota_total;
+
+  // Colapsar modos mixtos a puro cuando uno de los montos es 0
+  if((tipoSim === 'cuota_tiempo' || tipoSim === 'tiempo_cuota') && Y === 0) tipoSim = 'tiempo';
+  if((tipoSim === 'cuota_tiempo' || tipoSim === 'tiempo_cuota') && X === 0) tipoSim = 'cuota';
 
   // ── Cuotas previas a la amortización ──────────────────────────
   for(let i = 1; i <= S.cuota_desde; i++){
