@@ -297,8 +297,8 @@ header p { font-size: 13px; color: var(--text2); margin-top: 4px; }
         </div>
         <div class="field">
           <label>Cuota número donde se aplica la amortización</label>
-          <input type="number" id="cuota_desde" placeholder="1" min="1">
-          <div class="hint">Después de pagar la cuota N, se aplica la amortización. Ej: 1 = tras la primera cuota.</div>
+          <input type="number" id="cuota_desde" placeholder="1" min="0">
+          <div class="hint">0 = al inicio (antes de pagar cualquier cuota) · 1 = tras la primera cuota · N = tras la cuota N</div>
         </div>
       </div>
       <div id="calc-preview" class="alert info hidden"></div>
@@ -544,14 +544,20 @@ function validateStep1(){
     document.getElementById('plazo').value = p;
   }
 
-  const fields = ['capital','plazo','tea','cuota_total','cuota_desde'];
+  // cuota_desde puede ser 0 (amortizar antes de la primera cuota)
+  const fields_nonzero = ['capital','plazo','tea','cuota_total'];
   let ok = true;
-  fields.forEach(id => {
+  fields_nonzero.forEach(id => {
     const el = document.getElementById(id);
     const v  = parseFloat(el.value);
     el.classList.toggle('error', isNaN(v) || v <= 0);
     if(isNaN(v) || v <= 0) ok = false;
   });
+  // cuota_desde: válido si es número >= 0
+  const el_cd = document.getElementById('cuota_desde');
+  const v_cd  = parseFloat(el_cd.value);
+  el_cd.classList.toggle('error', isNaN(v_cd) || v_cd < 0);
+  if(isNaN(v_cd) || v_cd < 0) ok = false;
   if(!ok){ showPreview('Por favor completa todos los campos obligatorios.', 'warn'); return; }
 
   S.currency      = document.getElementById('currency').value;
@@ -561,7 +567,7 @@ function validateStep1(){
   S.cuota_total   = parseFloat(document.getElementById('cuota_total').value);
   S.seguro_total  = parseFloat(document.getElementById('seguro_total').value) || 0;
   S.intereses_orig= parseFloat(document.getElementById('intereses_orig').value) || 0;
-  S.cuota_desde   = parseInt(document.getElementById('cuota_desde').value) || 1;
+  S.cuota_desde   = parseInt(document.getElementById('cuota_desde').value) || 0;
   S.tem           = Math.pow(1 + S.tea, 1/12) - 1;
 
   // Back-calcular tasa_seguro con modelo correcto (cuota total fija)
@@ -587,7 +593,8 @@ function validateStep1(){
   S.tot_int_pre = tot_int_pre;
   S.tot_seg_pre = tot_seg_pre;
 
-  const msg = `Tasa seguro mensual: ${(S.tasa_seguro*100).toFixed(4)}% | TEM: ${(S.tem*100).toFixed(4)}% | Saldo tras cuota ${S.cuota_desde}: ${fmt(S.saldo_cN)}`;
+  const cd_label = S.cuota_desde === 0 ? 'Saldo inicial (amortización al inicio)' : `Saldo tras cuota ${S.cuota_desde}`;
+  const msg = `Tasa seguro mensual: ${(S.tasa_seguro*100).toFixed(4)}% | TEM: ${(S.tem*100).toFixed(4)}% | ${cd_label}: ${fmt(S.saldo_cN)}`;
   showPreview(msg, 'info');
 
   const Z = parseFloat(document.getElementById('monto_Z').value) || 0;
@@ -760,9 +767,10 @@ function simTodo(tipoSim, X, Y){
   for(let i = 0; i < n_final; i++){
     const int_i   = s * tem;
     const seg_i   = s * ts;
+    const amort_i = (i === n_final - 1) ? s : (cuota_final - int_i - seg_i);
     ti   += int_i;
     tseg += seg_i;
-    s    -= (cuota_final - int_i - seg_i);
+    s    -= amort_i;
     if(s < 0.005) s = 0;
   }
 
@@ -872,13 +880,26 @@ function buildCronograma(tipoSim, X, Y){
   // ── Cuotas restantes ──────────────────────────────────────────
   saldo = saldo_ini_bloque;
   for(let i = 0; i < n_final; i++){
-    const mes     = S.cuota_desde + 1 + i;
+    const mes     = S.cuota_desde === 0 ? i + 1 : S.cuota_desde + 1 + i;
     const int_i   = saldo * tem;
     const seg_i   = saldo * ts;
-    const amort_i = cuota_final - int_i - seg_i;
-    const sf      = saldo - amort_i;
+    const amort_normal = cuota_final - int_i - seg_i;
+    const esUltima = (i === n_final - 1) || (saldo - amort_normal < 0.50);
+    let amort_i, cuota_i, sf;
+    if(esUltima){
+      // Última cuota: se paga exactamente el saldo pendiente
+      // cuota real = saldo + interés + seguro (puede diferir de cuota_final)
+      amort_i = saldo;
+      cuota_i = saldo + int_i + seg_i;
+      sf = 0;
+    } else {
+      amort_i = amort_normal;
+      cuota_i = cuota_final;
+      sf = saldo - amort_i;
+    }
     rows.push({ mes, saldo_ini: saldo, interes: int_i, amort: amort_i,
-                seguro: seg_i, cuota: cuota_final, saldo_fin: Math.max(0, sf), tipo_row: 'normal' });
+                seguro: seg_i, cuota: cuota_i, saldo_fin: Math.max(0, sf),
+                tipo_row: 'normal', esUltima });
     saldo = Math.max(0, sf);
   }
   return rows;
