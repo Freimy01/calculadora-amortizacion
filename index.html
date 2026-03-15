@@ -1078,8 +1078,8 @@ function renderCronograma(crono){
   const thead = `<thead><tr>
     <th>N°</th>
     <th style="text-align:left">Saldo inicial</th>
-    <th>Interés</th>
     <th>Amortización</th>
+    <th>Interés</th>
     <th>Seguro</th>
     <th>Cuota total</th>
     <th>Saldo final</th>
@@ -1099,8 +1099,8 @@ function renderCronograma(crono){
       tbody += `<tr>
         <td>${r.mes}</td>
         <td style="text-align:left">${fmt(r.saldo_ini)}</td>
-        <td>${fmt(r.interes)}</td>
         <td>${fmt(r.amort)}</td>
+        <td>${fmt(r.interes)}</td>
         <td>${fmt(r.seguro)}</td>
         <td class="green">${fmt(r.cuota)}</td>
         <td>${fmt(r.saldo_fin)}</td>
@@ -1110,8 +1110,8 @@ function renderCronograma(crono){
   tbody += '</tbody>';
   const tfoot = `<tfoot><tr>
     <td>Total</td><td></td>
-    <td>${fmt(tot_int)}</td>
     <td>${fmt(tot_amort)}</td>
+    <td>${fmt(tot_int)}</td>
     <td>${fmt(tot_seg)}</td>
     <td>${fmt(tot_cuota)}</td>
     <td></td>
@@ -1220,28 +1220,32 @@ function renderCronogramaOriginal(){
   const crono = buildCronogramaOriginal();
   const n_generadas = crono.length;
 
-  // Nota dinámica si el número de cuotas difiere del plazo ingresado
+  // ── Nota dinámica en el header ────────────────────────────────
   const notaEl = document.querySelector('#tab-cronograma-original .alert.info');
   if(notaEl){
+    const tiene_datos_banco = S.intereses_orig > 0 || S.seguro_total > 0;
     let notaExtra = '';
     if(n_generadas !== S.plazo){
-      notaExtra = `<br><strong>Nota:</strong> El modelo genera <strong>${n_generadas} cuotas</strong> con la cuota ingresada
-      (${S.currency}${Number(S.cuota_total).toLocaleString('es-PE',{minimumFractionDigits:2,maximumFractionDigits:2})}).
-      El banco indicó <strong>${S.plazo} cuotas</strong>.
-      La diferencia de ${Math.abs(S.plazo - n_generadas)} cuota(s) se debe al redondeo de la cuota mensual —
-      el banco usa más decimales internamente. Los totales de intereses y seguro son correctos.
-      Si tienes la cuota con más decimales, ingrésala en el campo "Cuota mensual" para mayor precisión.`;
+      notaExtra = `<br><strong>Cuotas:</strong> El modelo genera <strong>${n_generadas} cuotas</strong>
+        con la cuota ingresada de ${fmt(S.cuota_total)}.
+        El banco indicó <strong>${S.plazo} cuotas</strong>.
+        La diferencia de ${Math.abs(S.plazo - n_generadas)} cuota(s) se debe al redondeo interno de la cuota —
+        ingresar más decimales reduce esta diferencia.`;
     }
-    notaEl.innerHTML = `Cronograma original del préstamo según los datos ingresados, <strong>sin ninguna amortización extraordinaria</strong>.
-      Sirve como referencia para comparar contra el cronograma actualizado.${notaExtra}`;
+    if(tiene_datos_banco){
+      notaExtra += `<br><strong>Intereses:</strong> El modelo calcula los intereses a partir de la TEA y la cuota ingresada.
+        Si los intereses calculados difieren de los del banco, es porque el banco usa una cuota interna con más decimales.
+        Esta diferencia no afecta el cálculo del ahorro, que usa el mismo modelo de forma consistente.`;
+    }
+    notaEl.innerHTML = `Cronograma original sin amortización extraordinaria. Referencia para comparar contra el cronograma actualizado.${notaExtra}`;
   }
 
   const table = document.getElementById('crono-table-original');
   const thead = `<thead><tr>
     <th>N°</th>
     <th style="text-align:left">Saldo inicial</th>
-    <th>Interés</th>
     <th>Amortización</th>
+    <th>Interés</th>
     <th>Seguro</th>
     <th>Cuota total</th>
     <th>Saldo final</th>
@@ -1257,22 +1261,65 @@ function renderCronogramaOriginal(){
     tbody += `<tr>
       <td>${r.mes}</td>
       <td style="text-align:left">${fmt(r.saldo_ini)}</td>
-      <td>${fmt(r.interes)}</td>
       <td>${fmt(r.amort)}</td>
+      <td>${fmt(r.interes)}</td>
       <td>${fmt(r.seguro)}</td>
       <td>${fmt(r.cuota)}</td>
       <td>${fmt(r.saldo_fin)}</td>
     </tr>`;
   });
   tbody += '</tbody>';
-  const tfoot = `<tfoot><tr>
-    <td>Total</td><td></td>
-    <td>${fmt(tot_int)}</td>
-    <td>${fmt(tot_amort)}</td>
-    <td>${fmt(tot_seg)}</td>
-    <td>${fmt(tot_cuota)}</td>
-    <td></td>
-  </tr></tfoot>`;
+
+  // ── Footer doble: Calculado vs Según banco ────────────────────
+  const tiene_int_banco  = S.intereses_orig > 0;
+  const tiene_seg_banco  = S.seguro_total   > 0;
+  const diff_int = tiene_int_banco  ? tot_int  - S.intereses_orig : null;
+  const diff_seg = tiene_seg_banco  ? tot_seg  - S.seguro_total   : null;
+  const diff_amort = tot_amort - S.capital;
+
+  const fmtDiff = (d) => {
+    if(d === null) return '—';
+    const abs = Math.abs(d);
+    const sign = d >= 0 ? '+' : '-';
+    const color = Math.abs(d) < 1 ? 'var(--accent)' : 'var(--warn)';
+    return `<span style="color:${color};font-size:10px">${sign}${fmt(abs)}</span>`;
+  };
+
+  let tfoot = `<tfoot>
+    <tr style="background:var(--surface2)">
+      <td style="font-weight:600;font-size:11px">Calculado</td><td></td>
+      <td style="font-weight:600">${fmt(tot_amort)}</td>
+      <td style="font-weight:600">${fmt(tot_int)}</td>
+      <td style="font-weight:600">${fmt(tot_seg)}</td>
+      <td style="font-weight:600">${fmt(tot_cuota)}</td>
+      <td></td>
+    </tr>`;
+
+  if(tiene_int_banco || tiene_seg_banco){
+    const int_banco_str  = tiene_int_banco  ? fmt(S.intereses_orig) : '—';
+    const seg_banco_str  = tiene_seg_banco  ? fmt(S.seguro_total)   : '—';
+    const amort_banco_str = fmt(S.capital);
+    const cuota_banco_str = (tiene_int_banco && tiene_seg_banco)
+      ? fmt(S.capital + S.intereses_orig + S.seguro_total) : '—';
+    tfoot += `
+    <tr style="background:var(--info-light)">
+      <td style="font-weight:600;font-size:11px;color:var(--info)">Según banco</td><td></td>
+      <td style="color:var(--info)">${amort_banco_str}</td>
+      <td style="color:var(--info)">${int_banco_str}</td>
+      <td style="color:var(--info)">${seg_banco_str}</td>
+      <td style="color:var(--info)">${cuota_banco_str}</td>
+      <td></td>
+    </tr>
+    <tr style="background:var(--surface2);border-top:1px dashed var(--border)">
+      <td style="font-size:10px;color:var(--text3)">Diferencia</td><td></td>
+      <td>${fmtDiff(diff_amort < 0.01 ? 0 : diff_amort)}</td>
+      <td>${fmtDiff(diff_int)}</td>
+      <td>${fmtDiff(diff_seg)}</td>
+      <td>—</td>
+      <td></td>
+    </tr>`;
+  }
+  tfoot += '</tfoot>';
   table.innerHTML = thead + tbody + tfoot;
 }
 
