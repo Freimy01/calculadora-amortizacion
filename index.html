@@ -392,7 +392,8 @@ header p { font-size: 13px; color: var(--text2); margin-top: 4px; }
       <div class="card-title"><span>3</span> Resultados</div>
       <div class="tab-bar">
         <button class="tab-btn active" onclick="showTab('resumen')">Resumen</button>
-        <button class="tab-btn" onclick="showTab('cronograma')">Cronograma completo</button>
+        <button class="tab-btn" onclick="showTab('cronograma')">Cronograma actualizado</button>
+        <button class="tab-btn" onclick="showTab('cronograma-original')">Cronograma original</button>
         <button class="tab-btn" onclick="showTab('comparativo')">Comparativo</button>
       </div>
 
@@ -412,6 +413,17 @@ header p { font-size: 13px; color: var(--text2); margin-top: 4px; }
         </div>
         <div class="crono-scroll">
           <div class="crono-wrap"><table class="crono-table" id="crono-table"></table></div>
+        </div>
+      </div>
+
+      <!-- TAB: CRONOGRAMA ORIGINAL -->
+      <div class="tab-content" id="tab-cronograma-original">
+        <div class="alert info" style="margin-bottom:12px;font-size:11px">
+          Cronograma original del préstamo según los datos ingresados, <strong>sin ninguna amortización extraordinaria</strong>.
+          Sirve como referencia para comparar contra el cronograma actualizado.
+        </div>
+        <div class="crono-scroll">
+          <div class="crono-wrap"><table class="crono-table" id="crono-table-original"></table></div>
         </div>
       </div>
 
@@ -945,7 +957,7 @@ function buildCronograma(tipoSim, X, Y){
     const int_i   = saldo * tem;
     const seg_i   = saldo * ts;
     const amort_normal = cuota_final - int_i - seg_i;
-    const esUltima = (i === n_final - 1) || (saldo - amort_normal < 0.50);
+    const esUltima = (i === n_final - 1) || (amort_normal >= saldo);
     let amort_i, cuota_i, sf;
     if(esUltima){
       // Última cuota: se paga exactamente el saldo pendiente
@@ -1047,6 +1059,9 @@ function renderResultados(res, crono, X, Y){
 
   renderCronograma(crono);
   renderComparativo(res, X, Y);
+  // Invalidar cronograma original para que se regenere al cambiar de pestaña
+  const tbl_orig = document.getElementById('crono-table-original');
+  if(tbl_orig) tbl_orig.innerHTML = '';
 }
 
 function barRow(label, val, max, cls){
@@ -1152,11 +1167,113 @@ function renderComparativo(res, X, Y){
 // ════════════════════════════════════════════════════════════════
 function showTab(name){
   document.querySelectorAll('.tab-btn').forEach((b,i) => {
-    const names = ['resumen','cronograma','comparativo'];
+    const names = ['resumen','cronograma','cronograma-original','comparativo'];
     b.classList.toggle('active', names[i] === name);
   });
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
+  // Renderizar cronograma original bajo demanda (solo la primera vez)
+  if(name === 'cronograma-original'){
+    const tbl = document.getElementById('crono-table-original');
+    if(!tbl.innerHTML) renderCronogramaOriginal();
+  }
+}
+
+// ════════════════════════════════════════════════════════════════
+// CRONOGRAMA ORIGINAL — construye el cronograma sin amortización
+// usando el modelo correcto de cuota total fija
+// ════════════════════════════════════════════════════════════════
+function buildCronogramaOriginal(){
+  const tem  = S.tem;
+  const ts   = S.tasa_seguro;
+  const ctot = S.cuota_total;
+  const rows = [];
+  let saldo  = S.capital;
+
+  // Iterar hasta que el saldo se agote (puede ser < plazo si la cuota está redondeada)
+  // esUltima se activa cuando la amortización normal superaría el saldo pendiente.
+  for(let i = 1; i <= S.plazo + 1; i++){
+    if(saldo < 0.005) break;
+    const int_i    = saldo * tem;
+    const seg_i    = saldo * ts;
+    const amort_n  = ctot - int_i - seg_i;
+    const esUltima = (amort_n >= saldo); // la cuota normal agotaría o excedería el saldo
+    let amort_i, cuota_i, sf;
+    if(esUltima){
+      amort_i = saldo;
+      cuota_i = saldo + int_i + seg_i;
+      sf = 0;
+    } else {
+      amort_i = amort_n;
+      cuota_i = ctot;
+      sf = saldo - amort_i;
+    }
+    rows.push({ mes: i, saldo_ini: saldo, interes: int_i, amort: amort_i,
+                seguro: seg_i, cuota: cuota_i, saldo_fin: Math.max(0, sf) });
+    saldo = Math.max(0, sf);
+    if(esUltima) break;
+  }
+  return rows;
+}
+
+function renderCronogramaOriginal(){
+  const crono = buildCronogramaOriginal();
+  const n_generadas = crono.length;
+
+  // Nota dinámica si el número de cuotas difiere del plazo ingresado
+  const notaEl = document.querySelector('#tab-cronograma-original .alert.info');
+  if(notaEl){
+    let notaExtra = '';
+    if(n_generadas !== S.plazo){
+      notaExtra = `<br><strong>Nota:</strong> El modelo genera <strong>${n_generadas} cuotas</strong> con la cuota ingresada
+      (${S.currency}${Number(S.cuota_total).toLocaleString('es-PE',{minimumFractionDigits:2,maximumFractionDigits:2})}).
+      El banco indicó <strong>${S.plazo} cuotas</strong>.
+      La diferencia de ${Math.abs(S.plazo - n_generadas)} cuota(s) se debe al redondeo de la cuota mensual —
+      el banco usa más decimales internamente. Los totales de intereses y seguro son correctos.
+      Si tienes la cuota con más decimales, ingrésala en el campo "Cuota mensual" para mayor precisión.`;
+    }
+    notaEl.innerHTML = `Cronograma original del préstamo según los datos ingresados, <strong>sin ninguna amortización extraordinaria</strong>.
+      Sirve como referencia para comparar contra el cronograma actualizado.${notaExtra}`;
+  }
+
+  const table = document.getElementById('crono-table-original');
+  const thead = `<thead><tr>
+    <th>N°</th>
+    <th style="text-align:left">Saldo inicial</th>
+    <th>Interés</th>
+    <th>Amortización</th>
+    <th>Seguro</th>
+    <th>Cuota total</th>
+    <th>Saldo final</th>
+  </tr></thead>`;
+  let tbody = '<tbody>';
+  let tot_int=0, tot_amort=0, tot_seg=0, tot_cuota=0;
+
+  crono.forEach(r => {
+    tot_int   += r.interes;
+    tot_amort += r.amort;
+    tot_seg   += r.seguro;
+    tot_cuota += r.cuota;
+    tbody += `<tr>
+      <td>${r.mes}</td>
+      <td style="text-align:left">${fmt(r.saldo_ini)}</td>
+      <td>${fmt(r.interes)}</td>
+      <td>${fmt(r.amort)}</td>
+      <td>${fmt(r.seguro)}</td>
+      <td>${fmt(r.cuota)}</td>
+      <td>${fmt(r.saldo_fin)}</td>
+    </tr>`;
+  });
+  tbody += '</tbody>';
+  const tfoot = `<tfoot><tr>
+    <td>Total</td><td></td>
+    <td>${fmt(tot_int)}</td>
+    <td>${fmt(tot_amort)}</td>
+    <td>${fmt(tot_seg)}</td>
+    <td>${fmt(tot_cuota)}</td>
+    <td></td>
+  </tr></tfoot>`;
+  table.innerHTML = thead + tbody + tfoot;
 }
 
 // ════════════════════════════════════════════════════════════════
