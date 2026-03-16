@@ -245,28 +245,37 @@ header p { font-size: 13px; color: var(--text2); margin-top: 4px; }
           <div class="hint">Monto total prestado por el banco</div>
         </div>
         <div class="field">
+          <label>Fecha de desembolso <span style="color:var(--text3);font-weight:400;font-size:10px">(opcional — el interés de los días de gracia se carga en la primera cuota)</span></label>
+          <input type="date" id="fecha_desembolso" onchange="onDesembolsoChange()" style="height:38px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;font-family:inherit;color:var(--text);background:var(--surface);outline:none;">
+          <div class="fecha-calculada" id="desembolso-label"></div>
+        </div>
+        <div class="field">
           <label>Plazo original</label>
           <div class="plazo-toggle">
             <button id="toggle-meses" class="active" onclick="switchPlazo('meses')">En meses</button>
             <button id="toggle-fechas" onclick="switchPlazo('fechas')">Por fechas</button>
           </div>
-          <!-- Opción A: meses directo -->
+          <!-- Opción A: meses + fecha primera cuota -->
           <div class="plazo-meses" id="plazo-meses-wrap">
-            <input type="number" id="plazo" placeholder="68" min="1" max="600">
-            <div class="hint">Número total de cuotas del préstamo</div>
+            <input type="number" id="plazo" placeholder="68" min="1" max="600" style="margin-bottom:8px">
+            <div class="hint" style="margin-bottom:6px">Número total de cuotas del préstamo</div>
+            <label style="font-size:11px;font-weight:500;color:var(--text2)">Fecha de la primera cuota <span style="color:var(--text3);font-weight:400">(opcional — activa cálculo por días reales)</span></label>
+            <input type="date" id="fecha_primera_cuota" onchange="onFechaPrimeraChange()" style="height:38px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;font-family:inherit;color:var(--text);background:var(--surface);outline:none;margin-top:4px">
+            <div class="fecha-calculada" id="fecha-primera-label"></div>
           </div>
-          <!-- Opción B: fecha inicio + fecha fin -->
+          <!-- Opción B: fecha inicio + fecha fin (día exacto) -->
           <div class="plazo-fechas" id="plazo-fechas-wrap">
             <div class="field" style="margin:0;flex:1">
-              <label style="font-size:11px">Fecha 1ª cuota</label>
-              <input type="month" id="fecha_inicio" onchange="calcularPlazoFechas()" style="height:38px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;font-family:inherit;color:var(--text);background:var(--surface);outline:none;">
+              <label style="font-size:11px">Fecha 1ª cuota (día/mes/año)</label>
+              <input type="date" id="fecha_inicio_exact" onchange="calcularPlazoFechasExact()" style="height:38px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;font-family:inherit;color:var(--text);background:var(--surface);outline:none;">
             </div>
             <div class="field" style="margin:0;flex:1">
-              <label style="font-size:11px">Fecha última cuota</label>
-              <input type="month" id="fecha_fin" onchange="calcularPlazoFechas()" style="height:38px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;font-family:inherit;color:var(--text);background:var(--surface);outline:none;">
+              <label style="font-size:11px">Fecha última cuota (día/mes/año)</label>
+              <input type="date" id="fecha_fin_exact" onchange="calcularPlazoFechasExact()" style="height:38px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;font-family:inherit;color:var(--text);background:var(--surface);outline:none;">
             </div>
           </div>
           <div class="fecha-calculada" id="plazo-calculado"></div>
+          <input type="hidden" id="plazo">
         </div>
       </div>
       <div class="form-grid three" style="margin-bottom:14px">
@@ -445,61 +454,192 @@ header p { font-size: 13px; color: var(--text2); margin-top: 4px; }
 // ESTADO GLOBAL
 // ════════════════════════════════════════════════════════════════
 let S = {
-  currency: 'S/ ', capital: 0, plazo: 0, tea: 0, cuota_total: 0,
-  seguro_total: 0, intereses_orig: 0, cuota_desde: 1,
-  tem: 0, cp_orig: 0, tasa_seguro: 0, saldo_cN: 0
+  currency:'S/ ', capital:0, plazo:0, tea:0, cuota_total:0,
+  seguro_total:0, intereses_orig:0, cuota_desde:1,
+  tem:0, tasa_seguro:0, saldo_cN:0,
+  // Días reales
+  fecha_primera: null,    // Date object o null
+  usa_dias_reales: false,
+  // Días de gracia (NO capitaliza — solo amplía el período de la cuota 1)
+  fecha_desembolso: null, // Date object o null
+  dias_gracia: 0,         // días entre desembolso y (primera_cuota − 1 mes)
+  dt_c1: 0                // días totales del período de la cuota 1 (gracia + normal)
 };
 let currentStep = 1;
 
 // ════════════════════════════════════════════════════════════════
-// UTILIDADES
+// UTILIDADES GENERALES
 // ════════════════════════════════════════════════════════════════
-const fmtN = (v, d=2) => {
-  if(isNaN(v)) return '—';
-  return Number(v).toLocaleString('es-PE', {minimumFractionDigits:d, maximumFractionDigits:d});
-};
-const fmt = v => S.currency + fmtN(v);
+const fmtN = (v,d=2) => isNaN(v)?'—':Number(v).toLocaleString('es-PE',{minimumFractionDigits:d,maximumFractionDigits:d});
+const fmt  = v => S.currency + fmtN(v);
 
-// Cuota pura (sin seguro) — solo para referencia y modo sin seguro
-const cuotaPura = (sal, n, tem) => sal * tem * Math.pow(1+tem,n) / (Math.pow(1+tem,n) - 1);
+// ════════════════════════════════════════════════════════════════
+// UTILIDADES DE FECHAS
+// ════════════════════════════════════════════════════════════════
+function diasEnMes(año, mes){ // mes 1-based
+  return new Date(año, mes, 0).getDate();
+}
 
-// Nuevo n iterando con cuota_total FIJA (incluye seguro variable sobre saldo)
-// Retorna número de cuotas necesarias para liquidar el saldo con cuota_total fija
-function nuevoN_conSeguro(saldo, cuota_tot, tem, tasa_seg) {
+function fechaCuotaN(fechaPrimera, n){
+  // Fecha de la cuota n (n=1 = fechaPrimera, n=2 = mes siguiente, etc.)
+  if(n === 1) return new Date(fechaPrimera);
+  const d = new Date(fechaPrimera);
+  const diaOriginal = d.getDate();
+  d.setMonth(d.getMonth() + (n - 1));
+  // Ajustar si el día no existe en el mes destino (ej. 31 en abril → 30)
+  const maxDia = diasEnMes(d.getFullYear(), d.getMonth() + 1);
+  if(diaOriginal > maxDia) d.setDate(maxDia);
+  else d.setDate(diaOriginal);
+  return d;
+}
+
+function diasEntreFechas(d1, d2){
+  return Math.round((d2 - d1) / 86400000);
+}
+
+function fechaPreviaACuota1(fechaPrimera){
+  // "Cuota 0" ficticia = un mes antes de la primera cuota
+  const d = new Date(fechaPrimera);
+  const diaOriginal = d.getDate();
+  d.setMonth(d.getMonth() - 1);
+  const maxDia = diasEnMes(d.getFullYear(), d.getMonth() + 1);
+  if(diaOriginal > maxDia) d.setDate(maxDia);
+  else d.setDate(diaOriginal);
+  return d;
+}
+
+function dtDeCuota(n, fechaPrimera){
+  // Días reales del período de la cuota n
+  // Para cuota 1: si hay fecha_desembolso → usar días desde desembolso (incluye días de gracia)
+  //               si no → usar cuota ficticia un mes antes (mes estándar)
+  let fAnt;
+  if(n === 1 && S.fecha_desembolso){
+    fAnt = new Date(S.fecha_desembolso);
+  } else if(n === 1){
+    fAnt = fechaPreviaACuota1(fechaPrimera);
+  } else {
+    fAnt = fechaCuotaN(fechaPrimera, n-1);
+  }
+  const fAct = fechaCuotaN(fechaPrimera, n);
+  return diasEntreFechas(fAnt, fAct);
+}
+
+function factorInteres(tea, dt){
+  return Math.pow(1 + tea, dt / 360) - 1;
+}
+
+function temEfectivo(n, fechaPrimera, tea){
+  // TEM real para la cuota n (con días reales) o TEM_30 si no hay fechas
+  if(S.usa_dias_reales && fechaPrimera){
+    const dt = dtDeCuota(n, fechaPrimera);
+    return factorInteres(tea, dt);
+  }
+  return Math.pow(1 + tea, 1/12) - 1; // TEM estándar
+}
+
+function formatFecha(d){
+  if(!d) return '—';
+  return d.toLocaleDateString('es-PE', {day:'2-digit', month:'2-digit', year:'numeric'});
+}
+
+// ════════════════════════════════════════════════════════════════
+// MOTOR DE CÁLCULO — tasa_seguro back-calc
+// ════════════════════════════════════════════════════════════════
+function calcTasaSeguro(capital, plazo, tea, cuota_tot, seg_tot, fechaPrimera, usaDiasReales){
+  if(seg_tot <= 0) return 0;
+  let lo = 0, hi = 0.05;
+  for(let iter = 0; iter < 100; iter++){
+    const ts = (lo+hi)/2;
+    let s=capital, suma=0; let ok=true;
+    for(let n=1; n<=plazo; n++){
+      const tem_n = usaDiasReales && fechaPrimera
+        ? factorInteres(tea, dtDeCuota(n, fechaPrimera))
+        : Math.pow(1+tea, 1/12)-1;
+      const int_i = s * tem_n;
+      const seg_i = s * ts;
+      const a     = cuota_tot - int_i - seg_i;
+      if(a <= 0){ ok=false; break; }
+      suma += seg_i; s -= a;
+    }
+    if(!ok){ hi=ts; continue; }
+    if(suma < seg_tot) lo=ts; else hi=ts;
+  }
+  return (lo+hi)/2;
+}
+
+// Nuevo N iterando con cuota_total fija (modelo días reales o estándar)
+function nuevoN_conSeguro(saldo, cuota_tot, tea, tasa_seg, fechaPrimera, n_inicio, usaDiasReales){
   if(saldo <= 0) return 0;
-  let s = saldo, n = 0;
-  while(s > 0.50 && n < 1200) {
-    const int_i  = s * tem;
-    const seg_i  = s * tasa_seg;
-    const amort_i = cuota_tot - int_i - seg_i;
-    if(amort_i <= 0) return null; // cuota no alcanza ni para intereses+seguro
-    s -= amort_i;
-    n++;
+  let s=saldo, n=0, cuota_n=n_inicio;
+  while(s > 0.50 && n < 1200){
+    const tem_n = usaDiasReales && fechaPrimera
+      ? factorInteres(tea, dtDeCuota(cuota_n, fechaPrimera))
+      : Math.pow(1+tea, 1/12)-1;
+    const a = cuota_tot - s*tem_n - s*tasa_seg;
+    if(a <= 0) return null;
+    s -= a; n++; cuota_n++;
   }
   return n;
 }
 
-// Back-calcular tasa_seguro con búsqueda binaria para que sum(seg_i) = seguro_total
-// usando el modelo correcto: amort = cuota_total - interés - seguro
-function calcTasaSeguro(cap, n, tem, cuota_tot, seg_total) {
-  if(seg_total <= 0) return 0;
-  let lo = 0, hi = 0.05;
-  for(let iter = 0; iter < 80; iter++) {
-    const mid = (lo + hi) / 2;
-    let saldo = cap, suma = 0;
-    let ok = true;
-    for(let i = 0; i < n; i++) {
-      const int_i   = saldo * tem;
-      const seg_i   = saldo * mid;
-      const amort_i = cuota_tot - int_i - seg_i;
-      if(amort_i <= 0) { ok = false; break; }
-      suma += seg_i;
-      saldo -= amort_i;
+// Nueva cuota para liquidar en exactamente n meses
+function nuevaCuotaParaN(saldo, n, tea, tasa_seg, fechaPrimera, n_inicio, usaDiasReales){
+  if(saldo <= 0 || n <= 0) return null;
+  const tem_ref = usaDiasReales && fechaPrimera
+    ? factorInteres(tea, dtDeCuota(n_inicio, fechaPrimera))
+    : Math.pow(1+tea, 1/12)-1;
+  let lo = saldo*(tem_ref+tasa_seg)*1.0001, hi=saldo;
+  for(let iter=0; iter<100; iter++){
+    const mid=(lo+hi)/2; let s=saldo, nc=n_inicio;
+    for(let i=0; i<n; i++){
+      const tem_i = usaDiasReales && fechaPrimera
+        ? factorInteres(tea, dtDeCuota(nc, fechaPrimera))
+        : Math.pow(1+tea,1/12)-1;
+      s -= (mid - s*tem_i - s*tasa_seg); nc++;
+      if(s < 0.005){ s=0; break; }
     }
-    if(!ok) { hi = mid; continue; }
-    if(suma < seg_total) lo = mid; else hi = mid;
+    if(s > 0.005) lo=mid; else hi=mid;
   }
-  return (lo + hi) / 2;
+  return (lo+hi)/2;
+}
+
+// ════════════════════════════════════════════════════════════════
+// DÍAS DE GRACIA — amplía el período de la cuota 1 sin tocar el capital
+// ════════════════════════════════════════════════════════════════
+function calcDiasGracia(fecha_desembolso, fecha_primera){
+  // Fecha de inicio del período normal = primera_cuota − 1 mes
+  const f_inicio = new Date(fecha_primera);
+  f_inicio.setMonth(f_inicio.getMonth() - 1);
+  const maxDia = diasEnMes(f_inicio.getFullYear(), f_inicio.getMonth()+1);
+  if(f_inicio.getDate() > maxDia) f_inicio.setDate(maxDia);
+
+  const dias_gracia   = Math.max(0, diasEntreFechas(fecha_desembolso, f_inicio));
+  const dias_c1_normal = diasEntreFechas(f_inicio, fecha_primera);
+  const dt_c1          = dias_gracia + dias_c1_normal;
+
+  return { dias_gracia, dias_c1_normal, dt_c1 };
+}
+
+function round2(v){ return Math.round(v * 100) / 100; }
+
+function onDesembolsoChange(){
+  const val = document.getElementById('fecha_desembolso').value;
+  const el  = document.getElementById('desembolso-label');
+  if(!val){ el.textContent=''; return; }
+  const [y,m,d] = val.split('-').map(Number);
+  const fd = new Date(y,m-1,d);
+  el.style.color = 'var(--text2)';
+  if(S.fecha_primera){
+    const g = calcDiasGracia(fd, S.fecha_primera);
+    if(g.dias_gracia > 0){
+      el.textContent = `${g.dias_gracia} días de gracia — período cuota 1: ${g.dt_c1} días (${g.dias_gracia}d gracia + ${g.dias_c1_normal}d normal). Capital sin cambio.`;
+      el.style.color = 'var(--warn)';
+    } else {
+      el.textContent = `Sin días de gracia — desembolso coincide con inicio del período`;
+    }
+  } else {
+    el.textContent = `Desembolso: ${formatFecha(fd)} — ingresa la fecha de primera cuota para calcular días de gracia`;
+  }
 }
 
 // Moneda prefix sync
@@ -548,15 +688,13 @@ function goStep(n){
 // STEP 1 VALIDATE
 // ════════════════════════════════════════════════════════════════
 function validateStep1(){
-  // Determinar plazo según modo activo
   const modoFechas = document.getElementById('toggle-fechas').classList.contains('active');
   if(modoFechas){
-    const p = calcularPlazoFechas();
-    if(!p || p < 1){ showPreview('Por favor ingresa las fechas de inicio y término del préstamo.', 'warn'); return; }
+    const p = calcularPlazoFechasExact();
+    if(!p || p < 1){ showPreview('Por favor ingresa las fechas de inicio y término del préstamo.','warn'); return; }
     document.getElementById('plazo').value = p;
   }
 
-  // cuota_desde puede ser 0 (amortizar antes de la primera cuota)
   const fields_nonzero = ['capital','plazo','tea','cuota_total'];
   let ok = true;
   fields_nonzero.forEach(id => {
@@ -565,12 +703,11 @@ function validateStep1(){
     el.classList.toggle('error', isNaN(v) || v <= 0);
     if(isNaN(v) || v <= 0) ok = false;
   });
-  // cuota_desde: válido si es número >= 0
   const el_cd = document.getElementById('cuota_desde');
   const v_cd  = parseFloat(el_cd.value);
   el_cd.classList.toggle('error', isNaN(v_cd) || v_cd < 0);
   if(isNaN(v_cd) || v_cd < 0) ok = false;
-  if(!ok){ showPreview('Por favor completa todos los campos obligatorios.', 'warn'); return; }
+  if(!ok){ showPreview('Por favor completa todos los campos obligatorios.','warn'); return; }
 
   S.currency      = document.getElementById('currency').value;
   S.capital       = parseFloat(document.getElementById('capital').value);
@@ -580,38 +717,80 @@ function validateStep1(){
   S.seguro_total  = parseFloat(document.getElementById('seguro_total').value) || 0;
   S.intereses_orig= parseFloat(document.getElementById('intereses_orig').value) || 0;
   S.cuota_desde   = parseInt(document.getElementById('cuota_desde').value) || 0;
-  S.tem           = Math.pow(1 + S.tea, 1/12) - 1;
 
-  // Back-calcular tasa_seguro con modelo correcto (cuota total fija)
-  S.tasa_seguro = calcTasaSeguro(S.capital, S.plazo, S.tem, S.cuota_total, S.seguro_total);
+  // ── Resolver fecha de primera cuota ──────────────────────────
+  S.fecha_primera   = null;
+  S.usa_dias_reales = false;
 
-  // Cuota pura de referencia (interés + amort, sin seguro) — solo informativa
-  S.cp_orig = S.cuota_total - S.capital * S.tasa_seguro; // aproximación mes 1
+  if(modoFechas){
+    const val = document.getElementById('fecha_inicio_exact').value;
+    if(val){
+      const [y,m,d] = val.split('-').map(Number);
+      S.fecha_primera   = new Date(y, m-1, d);
+      S.usa_dias_reales = true;
+    }
+  } else {
+    const val = document.getElementById('fecha_primera_cuota').value;
+    if(val){
+      const [y,m,d] = val.split('-').map(Number);
+      S.fecha_primera   = new Date(y, m-1, d);
+      S.usa_dias_reales = true;
+    }
+  }
 
-  // Calcular saldo y acumulados tras cuota N (modelo correcto)
-  let saldo = S.capital;
-  let tot_int_pre = 0, tot_seg_pre = 0;
-  for(let i = 0; i < S.cuota_desde; i++){
-    const int_i   = saldo * S.tem;
-    const seg_i   = saldo * S.tasa_seguro;
-    const amort_i = S.cuota_total - int_i - seg_i;
-    tot_int_pre += int_i;
-    tot_seg_pre += seg_i;
-    saldo -= amort_i;
-    if(saldo < 0.005) saldo = 0;
+  // ── Días de gracia — amplía dt de cuota 1, capital NO cambia ─
+  S.fecha_desembolso = null;
+  S.dias_gracia      = 0;
+  S.dt_c1            = 0;  // se calculará abajo
+
+  const valDesembolso = document.getElementById('fecha_desembolso').value;
+  if(valDesembolso && S.fecha_primera){
+    const [yd,md,dd] = valDesembolso.split('-').map(Number);
+    S.fecha_desembolso = new Date(yd, md-1, dd);
+    const g = calcDiasGracia(S.fecha_desembolso, S.fecha_primera);
+    S.dias_gracia = g.dias_gracia;
+    S.dt_c1       = g.dt_c1;  // dt_c1 > 0 solo si hay fecha primera
+  }
+
+  // ── Back-calc tasa_seguro con modelo correcto ─────────────────
+  // El seguro de cada cuota = saldo * ts * (dt_cuota/30)
+  // Se necesita ts tal que sum(saldo_i * ts * dt_i/30) = seguro_total
+  S.tasa_seguro = calcTasaSeguro(
+    S.capital, S.plazo, S.tea, S.cuota_total, S.seguro_total,
+    S.fecha_primera, S.usa_dias_reales, S.dt_c1
+  );
+
+  // ── Calcular saldo y acumulados tras cuota N ──────────────────
+  let saldo=S.capital, tot_int_pre=0, tot_seg_pre=0;
+  for(let n=1; n<=S.cuota_desde; n++){
+    const dt_n = (S.usa_dias_reales && S.fecha_primera)
+      ? (n===1 && S.dt_c1>0 ? S.dt_c1 : dtDeCuota(n, S.fecha_primera))
+      : 30;
+    const int_i = saldo * factorInteres(S.tea, dt_n);
+    const seg_i = saldo * S.tasa_seguro * (dt_n/30);
+    tot_int_pre += int_i; tot_seg_pre += seg_i;
+    saldo -= (S.cuota_total - int_i - seg_i);
+    if(saldo < 0.005) saldo=0;
   }
   S.saldo_cN    = saldo;
   S.n_rest      = S.plazo - S.cuota_desde;
   S.tot_int_pre = tot_int_pre;
   S.tot_seg_pre = tot_seg_pre;
+  S.n_inicio_bloque = S.cuota_desde + 1;
 
-  const cd_label = S.cuota_desde === 0 ? 'Saldo inicial (amortización al inicio)' : `Saldo tras cuota ${S.cuota_desde}`;
-  const msg = `Tasa seguro mensual: ${(S.tasa_seguro*100).toFixed(4)}% | TEM: ${(S.tem*100).toFixed(4)}% | ${cd_label}: ${fmt(S.saldo_cN)}`;
-  showPreview(msg, 'info');
+  // ── Preview informativo ───────────────────────────────────────
+  const modoLabel = S.usa_dias_reales
+    ? `Días reales ✓ · 1ª cuota: ${formatFecha(S.fecha_primera)}`
+    : 'Mes estándar (30 días)';
+  const graciaLabel = S.dias_gracia > 0
+    ? ` · ${S.dias_gracia} días de gracia · Período cuota 1: ${S.dt_c1} días · Capital: ${fmt(S.capital)} (sin cambio)`
+    : '';
+  const cdLabel = S.cuota_desde === 0 ? 'Saldo inicial' : `Saldo tras cuota ${S.cuota_desde}`;
+  const msg = `${modoLabel}${graciaLabel} · ts: ${(S.tasa_seguro*100).toFixed(4)}% · ${cdLabel}: ${fmt(S.saldo_cN)}`;
+  showPreview(msg, S.dias_gracia > 0 ? 'warn' : 'info');
 
   const Z = parseFloat(document.getElementById('monto_Z').value) || 0;
   if(Z > 0) setupSliders(Z);
-
   setTimeout(() => { goStep(2); }, 200);
 }
 
@@ -635,345 +814,252 @@ function onZChange(){
   } else { warn.classList.add('hidden'); }
 }
 function setupSliders(Z){
-  const sx = document.getElementById('slider-x');
-  const sy = document.getElementById('slider-y');
-  sx.max = Z; sy.max = Z;
-  const xv = Math.min(parseFloat(sx.value)||0, Z);
-  sx.value = xv; sy.value = Z - xv;
-  updateSliderDisplay(Z, xv);
+  const sx=document.getElementById('slider-x'), sy=document.getElementById('slider-y');
+  sx.max=Z; sy.max=Z;
+  const xv=Math.min(parseFloat(sx.value)||0,Z);
+  sx.value=xv; sy.value=Z-xv;
+  updateSliderDisplay(Z,xv);
 }
 function onSliderX(){
-  const Z = parseFloat(document.getElementById('monto_Z').value)||0;
-  const x = parseFloat(document.getElementById('slider-x').value)||0;
-  document.getElementById('slider-y').value = Z - x;
-  updateSliderDisplay(Z, x);
+  const Z=parseFloat(document.getElementById('monto_Z').value)||0;
+  const x=parseFloat(document.getElementById('slider-x').value)||0;
+  document.getElementById('slider-y').value=Z-x;
+  updateSliderDisplay(Z,x);
 }
 function onSliderY(){
-  const Z = parseFloat(document.getElementById('monto_Z').value)||0;
-  const y = parseFloat(document.getElementById('slider-y').value)||0;
-  document.getElementById('slider-x').value = Z - y;
-  updateSliderDisplay(Z, Z - y);
+  const Z=parseFloat(document.getElementById('monto_Z').value)||0;
+  const y=parseFloat(document.getElementById('slider-y').value)||0;
+  document.getElementById('slider-x').value=Z-y;
+  updateSliderDisplay(Z,Z-y);
 }
-function updateSliderDisplay(Z, x){
-  const y = Z - x;
-  document.getElementById('sv-x').textContent = fmt(x);
-  document.getElementById('sv-y').textContent = fmt(y);
-  const tot = document.getElementById('sl-total');
-  tot.textContent = `Total distribuido: ${fmt(x+y)} de ${fmt(Z)}`;
-  tot.className = 'slider-total ' + (Math.abs((x+y) - Z) < 1 ? 'ok' : 'warn');
+function updateSliderDisplay(Z,x){
+  const y=Z-x;
+  document.getElementById('sv-x').textContent=fmt(x);
+  document.getElementById('sv-y').textContent=fmt(y);
+  const tot=document.getElementById('sl-total');
+  tot.textContent=`Total distribuido: ${fmt(x+y)} de ${fmt(Z)}`;
+  tot.className='slider-total '+((Math.abs((x+y)-Z)<1)?'ok':'warn');
   document.getElementById('optimo-result').classList.add('hidden');
 }
 function syncSliders(){
-  const Z = parseFloat(document.getElementById('monto_Z').value)||0;
-  if(Z > 0) setupSliders(Z);
+  const Z=parseFloat(document.getElementById('monto_Z').value)||0;
+  if(Z>0) setupSliders(Z);
 }
 function setPref(p){
-  S.pref = p;
-  ['ahorro','equilibrio','cuota'].forEach(k => {
-    document.getElementById('pref-'+k).classList.toggle('active', k === p);
+  S.pref=p;
+  ['ahorro','equilibrio','cuota'].forEach(k=>{
+    document.getElementById('pref-'+k).classList.toggle('active',k===p);
   });
 }
 
 // ════════════════════════════════════════════════════════════════
-// OPTIMIZADOR — lógica corregida por preferencia
+// OPTIMIZADOR
 // ════════════════════════════════════════════════════════════════
 function calcOptimo(){
-  const Z      = parseFloat(document.getElementById('monto_Z').value)||0;
-  const dcMinManual = parseFloat(document.getElementById('dc_min').value)||0;
-  if(Z <= 0 || S.saldo_cN <= 0){ alert('Primero completa los datos del préstamo.'); return; }
-
-  const tipo  = document.querySelector('input[name=tipo]:checked').value;
-  const orden = tipo === 'mixto_cuota_tiempo' ? 'cuota_tiempo' : 'tiempo_cuota';
-  const pref  = S.pref || 'equilibrio';
-
-  // ── Caso simple: preferencia pura ──────────────────────────────
-  // "Maximizar ahorro" = todo a tiempo  → X=Z, Y=0
-  // "Bajar cuota máx." = todo a cuota   → X=0, Y=Z
-  if(pref === 'ahorro' && dcMinManual === 0){
-    aplicarOptimo(Z, 0, tipo, orden);
-    return;
-  }
-  if(pref === 'cuota' && dcMinManual === 0){
-    aplicarOptimo(0, Z, tipo, orden);
-    return;
-  }
-
-  // ── Construir tabla de resultados (paso 500) ────────────────────
-  const paso = Math.max(250, Math.round(Z/120/250)*250);
-  const resultados = [];
-  for(let x = 0; x <= Z; x += paso){
-    const y = Z - x;
-    const r = simTodo(orden, x, y);
+  const Z=parseFloat(document.getElementById('monto_Z').value)||0;
+  const dcMinManual=parseFloat(document.getElementById('dc_min').value)||0;
+  if(Z<=0||S.saldo_cN<=0){ alert('Primero completa los datos del préstamo.'); return; }
+  const tipo=document.querySelector('input[name=tipo]:checked').value;
+  const orden=tipo==='mixto_cuota_tiempo'?'cuota_tiempo':'tiempo_cuota';
+  const pref=S.pref||'equilibrio';
+  if(pref==='ahorro'&&dcMinManual===0){ aplicarOptimo(Z,0,tipo,orden); return; }
+  if(pref==='cuota'&&dcMinManual===0){  aplicarOptimo(0,Z,tipo,orden); return; }
+  const paso=Math.max(250,Math.round(Z/120/250)*250);
+  const resultados=[];
+  for(let x=0;x<=Z;x+=paso){
+    const r=simTodo(orden,x,Z-x);
     if(r) resultados.push(r);
   }
   if(!resultados.length){ alert('No se pudieron calcular resultados.'); return; }
-
-  // Bajada máxima posible (caso todo cuota, X=0)
-  const r_todo_cuota = simTodo(orden, 0, Z);
-  const dc_max_posible = r_todo_cuota ? r_todo_cuota.dc : Math.max(...resultados.map(r=>r.dc));
-
-  // ── Determinar umbral de bajada mínima ──────────────────────────
-  // Si el usuario puso un valor manual, se respeta.
-  // Si no, para "equilibrio" usamos 15% de la bajada máxima posible
-  // (garantiza que la cuota baje algo real, no solo S/ 5).
-  // Para "ahorro" con dc_min manual, se respeta ese filtro.
-  let dcUmbral;
-  if(dcMinManual > 0){
-    dcUmbral = dcMinManual;
-  } else if(pref === 'equilibrio'){
-    dcUmbral = dc_max_posible * 0.15;
-  } else {
-    dcUmbral = 0;
-  }
-
-  // ── Filtrar candidatos ──────────────────────────────────────────
-  const cands = resultados.filter(r => r.dc >= dcUmbral);
+  const r_todo_cuota=simTodo(orden,0,Z);
+  const dc_max_posible=r_todo_cuota?r_todo_cuota.dc:Math.max(...resultados.map(r=>r.dc));
+  const dcUmbral=dcMinManual>0?dcMinManual:(pref==='equilibrio'?dc_max_posible*0.15:0);
+  const cands=resultados.filter(r=>r.dc>=dcUmbral);
   if(!cands.length){
-    document.getElementById('optimo-result').innerHTML =
-      `<div class="alert warn">No hay combinaciones que cumplan el mínimo de bajada de cuota
-       de ${fmt(dcUmbral)}. Intenta reducir el valor mínimo o cambia la preferencia.</div>`;
-    document.getElementById('optimo-result').classList.remove('hidden');
-    return;
+    document.getElementById('optimo-result').innerHTML=`<div class="alert warn">No hay combinaciones que cumplan el mínimo de bajada de cuota de ${fmt(dcUmbral)}.</div>`;
+    document.getElementById('optimo-result').classList.remove('hidden'); return;
   }
-
-  // ── Elegir el mejor dentro de los candidatos ────────────────────
-  // Para "equilibrio" y "ahorro con filtro": maximizar ahorro (X ya es mayor)
-  // Para "cuota con filtro": maximizar bajada de cuota
   let best;
-  if(pref === 'cuota'){
-    best = cands.reduce((a,b) => a.dc >= b.dc ? a : b);
-  } else {
-    // equilibrio y ahorro con filtro: maximizar ahorro dentro del umbral
-    best = cands.reduce((a,b) => a.ahorro >= b.ahorro ? a : b);
-  }
-
-  aplicarOptimo(best.X, best.Y, tipo, orden, best);
+  if(pref==='cuota') best=cands.reduce((a,b)=>a.dc>=b.dc?a:b);
+  else               best=cands.reduce((a,b)=>a.ahorro>=b.ahorro?a:b);
+  aplicarOptimo(best.X,best.Y,tipo,orden,best);
 }
 
-function aplicarOptimo(X, Y, tipo, orden, res){
-  // Si no se pasó resultado pre-calculado, calcularlo ahora
-  const r = res || simTodo(orden, X, Y);
+function aplicarOptimo(X,Y,tipo,orden,res){
+  const r=res||simTodo(orden,X,Y);
   if(!r){ alert('No se pudo calcular.'); return; }
-
-  // Escribir en sliders respetando la convención de cada modo
-  const Z = parseFloat(document.getElementById('monto_Z').value)||0;
-  if(tipo === 'mixto_cuota_tiempo'){
-    document.getElementById('slider-x').value = Y;  // slider-x = Y(cuota)
-    document.getElementById('slider-y').value = X;  // slider-y = X(tiempo)
-    updateSliderDisplay(Z, Y);
+  const Z=parseFloat(document.getElementById('monto_Z').value)||0;
+  if(tipo==='mixto_cuota_tiempo'){
+    document.getElementById('slider-x').value=Y;
+    document.getElementById('slider-y').value=X;
+    updateSliderDisplay(Z,Y);
   } else {
-    document.getElementById('slider-x').value = X;  // slider-x = X(tiempo)
-    document.getElementById('slider-y').value = Y;  // slider-y = Y(cuota)
-    updateSliderDisplay(Z, X);
+    document.getElementById('slider-x').value=X;
+    document.getElementById('slider-y').value=Y;
+    updateSliderDisplay(Z,X);
   }
-
-  const el = document.getElementById('optimo-result');
-  const dc_str = r.dc > 0.5 ? `↓${fmt(r.dc)}` : 'inamovible';
-  const pref_label = {ahorro:'Maximizar ahorro', equilibrio:'Equilibrio', cuota:'Bajar cuota máx.'}[S.pref||'equilibrio'];
-  el.innerHTML = `<div class="alert success">
+  const dc_str=r.dc>0.5?`↓${fmt(r.dc)}`:'inamovible';
+  const pref_label={ahorro:'Maximizar ahorro',equilibrio:'Equilibrio',cuota:'Bajar cuota máx.'}[S.pref||'equilibrio'];
+  document.getElementById('optimo-result').innerHTML=`<div class="alert success">
     <strong>Óptimo (${pref_label}):</strong> Reduce tiempo: ${fmt(X)} · Reduce cuota: ${fmt(Y)}<br>
     Ahorro total: ${fmt(r.ahorro)} · Plazo: ${r.n_total} meses · Cuota: ${fmt(r.cuota_disp)} (${dc_str})
   </div>`;
-  el.classList.remove('hidden');
+  document.getElementById('optimo-result').classList.remove('hidden');
 }
 
 // ════════════════════════════════════════════════════════════════
-// SIMULACIÓN CENTRAL — modelo correcto: cuota total FIJA
-// amort_i = cuota_total - interés_i - seguro_i  (seguro sobre saldo)
+// SIMULACIÓN CENTRAL — soporta días reales y mes estándar
 // ════════════════════════════════════════════════════════════════
 function simTodo(tipoSim, X, Y){
-  const tem    = S.tem;
-  const ts     = S.tasa_seguro;
-  const ctot   = S.cuota_total;   // cuota total fija
-  let ti = S.tot_int_pre, tseg = S.tot_seg_pre;
-  let saldo = S.saldo_cN;
-  const n_rest = S.n_rest;
-
-  let n_final, saldo_ini_bloque, cuota_final;
+  const tea=S.tea, ts=S.tasa_seguro, ctot=S.cuota_total;
+  const fp=S.fecha_primera, udr=S.usa_dias_reales;
+  let ti=S.tot_int_pre, tseg=S.tot_seg_pre;
+  let saldo=S.saldo_cN;
+  const n_rest=S.n_rest, ni0=S.n_inicio_bloque;
 
   // Colapsar modos mixtos a puro cuando uno de los montos es 0
-  if((tipoSim === 'cuota_tiempo' || tipoSim === 'tiempo_cuota') && Y === 0) tipoSim = 'tiempo';
-  if((tipoSim === 'cuota_tiempo' || tipoSim === 'tiempo_cuota') && X === 0) tipoSim = 'cuota';
+  if((tipoSim==='cuota_tiempo'||tipoSim==='tiempo_cuota')&&Y===0) tipoSim='tiempo';
+  if((tipoSim==='cuota_tiempo'||tipoSim==='tiempo_cuota')&&X===0) tipoSim='cuota';
 
-  if(tipoSim === 'tiempo'){
-    // Amortiza Z → reduce tiempo, cuota_total INAMOVIBLE
-    saldo -= X; if(saldo <= 0.005) return null;
-    const nN = nuevoN_conSeguro(saldo, ctot, tem, ts);
+  let n_final, saldo_ini_bloque, cuota_final, n_inicio_sim;
+
+  if(tipoSim==='tiempo'){
+    saldo-=X; if(saldo<=0.005) return null;
+    const nN=nuevoN_conSeguro(saldo,ctot,tea,ts,fp,ni0,udr);
     if(!nN) return null;
-    n_final = nN; saldo_ini_bloque = saldo; cuota_final = ctot;
-
-  } else if(tipoSim === 'cuota'){
-    // Amortiza Z → reduce cuota, n_rest fijo
-    // Nueva cuota total: resolver para que el préstamo liquide en n_rest meses
-    saldo -= Y; if(saldo <= 0.005) return null;
-    const nuevaCuota = nuevaCuotaParaN(saldo, n_rest, tem, ts);
-    if(!nuevaCuota) return null;
-    n_final = n_rest; saldo_ini_bloque = saldo; cuota_final = nuevaCuota;
-
-  } else if(tipoSim === 'cuota_tiempo'){
-    // Orden: cuota primero (Y), luego tiempo (X) — mejor ahorro demostrado
-    saldo -= Y; if(saldo <= 0.005) return null;
-    const cuota_b = nuevaCuotaParaN(saldo, n_rest, tem, ts);
-    if(!cuota_b) return null;
-    saldo -= X; if(saldo <= 0.005) return null;
-    const nN = nuevoN_conSeguro(saldo, cuota_b, tem, ts);
+    n_final=nN; saldo_ini_bloque=saldo; cuota_final=ctot; n_inicio_sim=ni0;
+  } else if(tipoSim==='cuota'){
+    saldo-=Y; if(saldo<=0.005) return null;
+    const nc=nuevaCuotaParaN(saldo,n_rest,tea,ts,fp,ni0,udr);
+    if(!nc) return null;
+    n_final=n_rest; saldo_ini_bloque=saldo; cuota_final=nc; n_inicio_sim=ni0;
+  } else if(tipoSim==='cuota_tiempo'){
+    saldo-=Y; if(saldo<=0.005) return null;
+    const cp_b=nuevaCuotaParaN(saldo,n_rest,tea,ts,fp,ni0,udr);
+    saldo-=X; if(saldo<=0.005) return null;
+    const nN=nuevoN_conSeguro(saldo,cp_b,tea,ts,fp,ni0,udr);
     if(!nN) return null;
-    n_final = nN; saldo_ini_bloque = saldo; cuota_final = cuota_b;
-
+    n_final=nN; saldo_ini_bloque=saldo; cuota_final=cp_b; n_inicio_sim=ni0;
   } else { // tiempo_cuota
-    // Orden: tiempo primero (X), luego cuota (Y)
-    saldo -= X; if(saldo <= 0.005) return null;
-    const nN = nuevoN_conSeguro(saldo, ctot, tem, ts);
+    saldo-=X; if(saldo<=0.005) return null;
+    const nN=nuevoN_conSeguro(saldo,ctot,tea,ts,fp,ni0,udr);
     if(!nN) return null;
-    saldo -= Y; if(saldo <= 0.005) return null;
-    const nuevaCuota = nuevaCuotaParaN(saldo, nN, tem, ts);
-    if(!nuevaCuota) return null;
-    n_final = nN; saldo_ini_bloque = saldo; cuota_final = nuevaCuota;
+    saldo-=Y; if(saldo<=0.005) return null;
+    const nc=nuevaCuotaParaN(saldo,nN,tea,ts,fp,ni0,udr);
+    if(!nc) return null;
+    n_final=nN; saldo_ini_bloque=saldo; cuota_final=nc; n_inicio_sim=ni0;
   }
 
-  // Simular bloque restante acumulando intereses y seguro
-  let s = saldo_ini_bloque;
-  for(let i = 0; i < n_final; i++){
-    const int_i   = s * tem;
-    const seg_i   = s * ts;
-    const amort_i = (i === n_final - 1) ? s : (cuota_final - int_i - seg_i);
-    ti   += int_i;
-    tseg += seg_i;
-    s    -= amort_i;
-    if(s < 0.005) s = 0;
+  let s=saldo_ini_bloque, nc=n_inicio_sim;
+  for(let i=0;i<n_final;i++){
+    const tem_i=udr&&fp?factorInteres(tea,dtDeCuota(nc,fp)):Math.pow(1+tea,1/12)-1;
+    const int_i=s*tem_i, seg_i=s*ts;
+    const amort_i=(i===n_final-1)?s:(cuota_final-int_i-seg_i);
+    ti+=int_i; tseg+=seg_i;
+    s-=amort_i; nc++;
+    if(s<0.005) s=0;
   }
 
-  const n_total    = S.cuota_desde + n_final;
-  const ahorro_int = S.intereses_orig > 0 ? S.intereses_orig - ti : null;
-  const ahorro_seg = S.seguro_total - tseg;
-  const ahorro_tot = (S.intereses_orig > 0 && S.seguro_total > 0)
-                     ? (S.intereses_orig + S.seguro_total) - (ti + tseg) : null;
-
-  // Para "reducir tiempo": cuota es inamovible = cuota_total original
-  // dc = 0 (no bajó la cuota)
-  const cuota_disp = cuota_final;
-  const dc = S.cuota_total - cuota_disp;
+  const n_total=S.cuota_desde+n_final;
+  const ahorro_int=S.intereses_orig>0?S.intereses_orig-ti:null;
+  const ahorro_seg=S.seguro_total-tseg;
+  const ahorro_tot=(S.intereses_orig>0&&S.seguro_total>0)?(S.intereses_orig+S.seguro_total)-(ti+tseg):null;
+  const cuota_disp=cuota_final;
+  const dc=S.cuota_total-cuota_disp;
 
   return {
-    tipo: tipoSim, X, Y,
-    tot_int: ti, tot_seg: tseg,
-    ahorro_int, ahorro_seg, ahorro: ahorro_tot,
-    n_total, meses_menos: S.plazo - n_total,
-    cuota_disp, dc,
-    saldo_ini_bloque
+    tipo:tipoSim, X, Y,
+    tot_int:ti, tot_seg:tseg,
+    ahorro_int, ahorro_seg, ahorro:ahorro_tot,
+    n_total, meses_menos:S.plazo-n_total,
+    cuota_disp, dc, saldo_ini_bloque
   };
 }
 
-// Calcula nueva cuota total para que el préstamo liquide en exactamente n meses
-// con cuota total fija (incluye seguro variable sobre saldo)
-function nuevaCuotaParaN(saldo_ini, n, tem, ts){
-  if(saldo_ini <= 0 || n <= 0) return null;
-  // Búsqueda binaria: cuota más baja que liquida el saldo en <= n meses
-  const ctot_min = saldo_ini * (tem + ts) * 1.0001; // mínimo para cubrir int+seg
-  let lo = ctot_min, hi = saldo_ini; // máximo absurdo
-  for(let iter = 0; iter < 80; iter++){
-    const mid = (lo + hi) / 2;
-    let s = saldo_ini;
-    for(let i = 0; i < n; i++){
-      const int_i = s * tem;
-      const seg_i = s * ts;
-      s -= (mid - int_i - seg_i);
-      if(s < 0.005){ s = 0; break; }
-    }
-    if(s > 0.005) lo = mid; else hi = mid;
-  }
-  return (lo + hi) / 2;
-}
-
-function simMixto(X, Y, orden){ return simTodo(orden, X, Y); }
-
 // ════════════════════════════════════════════════════════════════
-// CRONOGRAMA COMPLETO — cuota total FIJA
+// CRONOGRAMA COMPLETO — soporta días reales y mes estándar
 // ════════════════════════════════════════════════════════════════
 function buildCronograma(tipoSim, X, Y){
-  const tem = S.tem;
-  const ts  = S.tasa_seguro;
-  const rows = [];
+  const tea=S.tea, ts=S.tasa_seguro, ctot=S.cuota_total;
+  const fp=S.fecha_primera, udr=S.usa_dias_reales;
+  const rows=[];
+  // Fila informativa: período de días de gracia
+  if(S.dias_gracia > 0){
+    rows.push({
+      tipo_row:'dias_gracia',
+      dias:S.dias_gracia,
+      fecha_desembolso:S.fecha_desembolso,
+      fecha_primera:S.fecha_primera,
+      capital:S.capital,
+      dt_c1:diasEntreFechas(S.fecha_desembolso, S.fecha_primera)
+    });
+  }
   let saldo = S.capital;
-  let n_final, saldo_ini_bloque, cuota_final;
-  const n_rest = S.n_rest;
-  const ctot = S.cuota_total;
+  let n_final, saldo_ini_bloque, cuota_final, n_inicio_sim;
+  const n_rest=S.n_rest, ni0=S.n_inicio_bloque;
 
-  // Colapsar modos mixtos a puro cuando uno de los montos es 0
-  if((tipoSim === 'cuota_tiempo' || tipoSim === 'tiempo_cuota') && Y === 0) tipoSim = 'tiempo';
-  if((tipoSim === 'cuota_tiempo' || tipoSim === 'tiempo_cuota') && X === 0) tipoSim = 'cuota';
+  // Colapsar modos mixtos a puro
+  if((tipoSim==='cuota_tiempo'||tipoSim==='tiempo_cuota')&&Y===0) tipoSim='tiempo';
+  if((tipoSim==='cuota_tiempo'||tipoSim==='tiempo_cuota')&&X===0) tipoSim='cuota';
 
-  // ── Cuotas previas a la amortización ──────────────────────────
-  for(let i = 1; i <= S.cuota_desde; i++){
-    const int_i   = saldo * tem;
-    const seg_i   = saldo * ts;
-    const amort_i = ctot - int_i - seg_i;
-    rows.push({ mes: i, saldo_ini: saldo, interes: int_i, amort: amort_i,
-                seguro: seg_i, cuota: ctot, saldo_fin: saldo - amort_i, tipo_row: 'normal' });
-    saldo -= amort_i;
-    if(saldo < 0.005) saldo = 0;
+  // Cuotas previas
+  for(let n=1;n<=S.cuota_desde;n++){
+    const tem_n=udr&&fp?factorInteres(tea,dtDeCuota(n,fp)):Math.pow(1+tea,1/12)-1;
+    const int_i=saldo*tem_n, seg_i=saldo*ts, amort_i=ctot-int_i-seg_i;
+    const fAct=udr&&fp?fechaCuotaN(fp,n):null;
+    rows.push({mes:n, fecha:fAct, dt:udr&&fp?dtDeCuota(n,fp):30,
+               saldo_ini:saldo, interes:int_i, amort:amort_i,
+               seguro:seg_i, cuota:ctot, saldo_fin:saldo-amort_i, tipo_row:'normal'});
+    saldo-=amort_i; if(saldo<0.005) saldo=0;
   }
 
-  // ── Amortizaciones ────────────────────────────────────────────
-  let amort_events = [];
-
-  if(tipoSim === 'tiempo'){
-    amort_events.push({ label: 'Amortización extraordinaria (reduce tiempo)', monto: X });
-    saldo -= X;
-    n_final = nuevoN_conSeguro(saldo, ctot, tem, ts);
-    saldo_ini_bloque = saldo; cuota_final = ctot;
-
-  } else if(tipoSim === 'cuota'){
-    amort_events.push({ label: 'Amortización extraordinaria (reduce cuota)', monto: Y });
-    saldo -= Y;
-    cuota_final = nuevaCuotaParaN(saldo, n_rest, tem, ts);
-    n_final = n_rest; saldo_ini_bloque = saldo;
-
-  } else if(tipoSim === 'cuota_tiempo'){
-    amort_events.push({ label: 'Amortización 1 — reduce cuota (Y)', monto: Y });
-    amort_events.push({ label: 'Amortización 2 — reduce tiempo (X)', monto: X });
-    saldo -= Y;
-    const cuota_b = nuevaCuotaParaN(saldo, n_rest, tem, ts);
-    saldo -= X;
-    n_final = nuevoN_conSeguro(saldo, cuota_b, tem, ts);
-    saldo_ini_bloque = saldo; cuota_final = cuota_b;
-
-  } else { // tiempo_cuota
-    amort_events.push({ label: 'Amortización 1 — reduce tiempo (X)', monto: X });
-    amort_events.push({ label: 'Amortización 2 — reduce cuota (Y)', monto: Y });
-    saldo -= X;
-    const nN = nuevoN_conSeguro(saldo, ctot, tem, ts);
-    saldo -= Y;
-    cuota_final = nuevaCuotaParaN(saldo, nN, tem, ts);
-    n_final = nN; saldo_ini_bloque = saldo;
+  // Amortizaciones
+  let amort_events=[];
+  if(tipoSim==='tiempo'){
+    amort_events.push({label:'Amortización extraordinaria (reduce tiempo)',monto:X});
+    saldo-=X;
+    n_final=nuevoN_conSeguro(saldo,ctot,tea,ts,fp,ni0,udr);
+    saldo_ini_bloque=saldo; cuota_final=ctot; n_inicio_sim=ni0;
+  } else if(tipoSim==='cuota'){
+    amort_events.push({label:'Amortización extraordinaria (reduce cuota)',monto:Y});
+    saldo-=Y;
+    cuota_final=nuevaCuotaParaN(saldo,n_rest,tea,ts,fp,ni0,udr);
+    n_final=n_rest; saldo_ini_bloque=saldo; n_inicio_sim=ni0;
+  } else if(tipoSim==='cuota_tiempo'){
+    amort_events.push({label:'Amortización 1 — reduce cuota (Y)',monto:Y});
+    amort_events.push({label:'Amortización 2 — reduce tiempo (X)',monto:X});
+    saldo-=Y;
+    const cp_b=nuevaCuotaParaN(saldo,n_rest,tea,ts,fp,ni0,udr);
+    saldo-=X;
+    n_final=nuevoN_conSeguro(saldo,cp_b,tea,ts,fp,ni0,udr);
+    saldo_ini_bloque=saldo; cuota_final=cp_b; n_inicio_sim=ni0;
+  } else {
+    amort_events.push({label:'Amortización 1 — reduce tiempo (X)',monto:X});
+    amort_events.push({label:'Amortización 2 — reduce cuota (Y)',monto:Y});
+    saldo-=X;
+    const nN=nuevoN_conSeguro(saldo,ctot,tea,ts,fp,ni0,udr);
+    saldo-=Y;
+    cuota_final=nuevaCuotaParaN(saldo,nN,tea,ts,fp,ni0,udr);
+    n_final=nN; saldo_ini_bloque=saldo; n_inicio_sim=ni0;
   }
+  amort_events.forEach(e=>rows.push({tipo_row:'amort',label:e.label,monto:e.monto}));
 
-  amort_events.forEach(e => rows.push({ tipo_row: 'amort', label: e.label, monto: e.monto }));
-
-  // ── Cuotas restantes ──────────────────────────────────────────
-  saldo = saldo_ini_bloque;
-  for(let i = 0; i < n_final; i++){
-    const mes     = S.cuota_desde === 0 ? i + 1 : S.cuota_desde + 1 + i;
-    const int_i   = saldo * tem;
-    const seg_i   = saldo * ts;
-    const amort_normal = cuota_final - int_i - seg_i;
-    const esUltima = (i === n_final - 1) || (amort_normal >= saldo);
+  // Cuotas restantes
+  saldo=saldo_ini_bloque; let nc=n_inicio_sim;
+  for(let i=0;i<n_final;i++){
+    const mes=S.cuota_desde===0?i+1:S.cuota_desde+1+i;
+    const fAct=udr&&fp?fechaCuotaN(fp,nc):null;
+    const dt=udr&&fp?dtDeCuota(nc,fp):30;
+    const tem_i=udr&&fp?factorInteres(tea,dt):Math.pow(1+tea,1/12)-1;
+    const int_i=saldo*tem_i, seg_i=saldo*ts, amort_n=cuota_final-int_i-seg_i;
+    const esUltima=(i===n_final-1)||(amort_n>=saldo);
     let amort_i, cuota_i, sf;
-    if(esUltima){
-      // Última cuota: se paga exactamente el saldo pendiente
-      // cuota real = saldo + interés + seguro (puede diferir de cuota_final)
-      amort_i = saldo;
-      cuota_i = saldo + int_i + seg_i;
-      sf = 0;
-    } else {
-      amort_i = amort_normal;
-      cuota_i = cuota_final;
-      sf = saldo - amort_i;
-    }
-    rows.push({ mes, saldo_ini: saldo, interes: int_i, amort: amort_i,
-                seguro: seg_i, cuota: cuota_i, saldo_fin: Math.max(0, sf),
-                tipo_row: 'normal', esUltima });
-    saldo = Math.max(0, sf);
+    if(esUltima){ amort_i=saldo; cuota_i=saldo+int_i+seg_i; sf=0; }
+    else         { amort_i=amort_n; cuota_i=cuota_final; sf=saldo-amort_i; }
+    rows.push({mes, fecha:fAct, dt, saldo_ini:saldo, interes:int_i,
+               amort:amort_i, seguro:seg_i, cuota:cuota_i,
+               saldo_fin:Math.max(0,sf), tipo_row:'normal', esUltima});
+    saldo=Math.max(0,sf); nc++;
   }
   return rows;
 }
@@ -982,90 +1068,89 @@ function buildCronograma(tipoSim, X, Y){
 // CALCULAR (botón principal)
 // ════════════════════════════════════════════════════════════════
 function calcular(){
-  const Z = parseFloat(document.getElementById('monto_Z').value)||0;
-  if(Z <= 0){ alert('Ingresa el monto a amortizar (Z).'); return; }
-  if(S.saldo_cN <= 0){ alert('Primero completa los datos del préstamo.'); return; }
-  if(Z > S.saldo_cN){ alert(`El monto Z (${fmt(Z)}) supera el saldo pendiente (${fmt(S.saldo_cN)}).`); return; }
-
-  S.monto_Z = Z;
-  S.tipo = document.querySelector('input[name=tipo]:checked').value;
-
-  let X = Z, Y = 0;
+  const Z=parseFloat(document.getElementById('monto_Z').value)||0;
+  if(Z<=0){ alert('Ingresa el monto a amortizar (Z).'); return; }
+  if(S.saldo_cN<=0){ alert('Primero completa los datos del préstamo.'); return; }
+  if(Z>S.saldo_cN){ alert(`El monto Z (${fmt(Z)}) supera el saldo pendiente (${fmt(S.saldo_cN)}).`); return; }
+  S.monto_Z=Z;
+  S.tipo=document.querySelector('input[name=tipo]:checked').value;
+  let X=Z, Y=0;
   if(S.tipo.startsWith('mixto')){
-    const xv = parseFloat(document.getElementById('slider-x').value)||0;
-    const yv = parseFloat(document.getElementById('slider-y').value)||0;
-    if(S.tipo === 'mixto_cuota_tiempo'){ Y = xv; X = yv; }
-    else { X = xv; Y = yv; }
-  } else if(S.tipo === 'cuota'){
-    X = 0; Y = Z;
-  }
-
-  const tipoSim = S.tipo.replace('mixto_','');
-  const res = simTodo(tipoSim, X, Y);
+    const xv=parseFloat(document.getElementById('slider-x').value)||0;
+    const yv=parseFloat(document.getElementById('slider-y').value)||0;
+    if(S.tipo==='mixto_cuota_tiempo'){ Y=xv; X=yv; }
+    else { X=xv; Y=yv; }
+  } else if(S.tipo==='cuota'){ X=0; Y=Z; }
+  const tipoSim=S.tipo.replace('mixto_','');
+  const res=simTodo(tipoSim,X,Y);
   if(!res){ alert('No se pudo calcular. Verifica los datos.'); return; }
-
-  const crono = buildCronograma(tipoSim, X, Y);
-  renderResultados(res, crono, X, Y);
-  currentStep = 2;
-  goStep(3);
+  const crono=buildCronograma(tipoSim,X,Y);
+  renderResultados(res,crono,X,Y);
+  currentStep=2; goStep(3);
 }
 
 // ════════════════════════════════════════════════════════════════
 // RENDER RESULTADOS
 // ════════════════════════════════════════════════════════════════
-function renderResultados(res, crono, X, Y){
-  const alert_el = document.getElementById('result-alert');
-  const label_tipo = { tiempo:'Todo a reducir tiempo', cuota:'Todo a reducir cuota',
-                       cuota_tiempo:'Mixto: cuota → tiempo', tiempo_cuota:'Mixto: tiempo → cuota' };
-  alert_el.innerHTML = `<strong>${label_tipo[res.tipo]}</strong> · Z = ${fmt(S.monto_Z)} ${res.tipo.startsWith('cuota_tiempo')||res.tipo.startsWith('tiempo_cuota') ? `(X=${fmt(X)}, Y=${fmt(Y)})` : ''}`;
+function renderResultados(res,crono,X,Y){
+  const alert_el=document.getElementById('result-alert');
+  const label_tipo={tiempo:'Todo a reducir tiempo',cuota:'Todo a reducir cuota',
+                    cuota_tiempo:'Mixto: cuota → tiempo',tiempo_cuota:'Mixto: tiempo → cuota'};
+  const modo_label=S.usa_dias_reales?` · <span style="color:var(--accent);font-size:11px">📅 Días reales</span>`:'';
+  alert_el.innerHTML=`<strong>${label_tipo[res.tipo]}</strong> · Z = ${fmt(S.monto_Z)}${modo_label}`;
   alert_el.classList.remove('hidden');
 
-  const grid = document.getElementById('results-grid');
-  const metrics = [
-    { label:'Meses totales del préstamo', val: res.n_total,
-      sub: `Reducción: -${res.meses_menos} meses respecto al plazo original`,
-      cls: res.meses_menos > 0 ? 'green' : '', highlight: res.meses_menos > 0 },
-    { label: res.tipo === 'tiempo' ? 'Cuota mensual (inamovible)' : 'Cuota mensual nueva',
-      val: fmt(res.cuota_disp),
-      sub: res.tipo === 'tiempo'
-        ? `Sin cambio — permanece exactamente igual que antes`
-        : `Antes: ${fmt(S.cuota_total)} · Ahorro mensual: ${fmt(res.dc)}`,
-      cls: res.tipo === 'tiempo' ? '' : (res.dc > 0 ? 'green' : '') },
-    { label:'Total intereses pagados', val: fmt(res.tot_int),
-      sub: S.intereses_orig > 0 ? `Original: ${fmt(S.intereses_orig)}` : '', cls:'' },
-    { label:'Total seguro pagado', val: fmt(res.tot_seg),
-      sub: S.seguro_total > 0 ? `Original: ${fmt(S.seguro_total)}` : '', cls:'' },
-    { label:'Ahorro en intereses', val: res.ahorro_int !== null ? fmt(res.ahorro_int) : '—',
-      sub:'Intereses que ya no pagarás', cls:'green', highlight: true },
-    { label:'Ahorro total (int + seg)', val: res.ahorro !== null ? fmt(res.ahorro) : '—',
-      sub:'Intereses + seguro ahorrado', cls:'green', highlight: res.ahorro > 0 },
+  const grid=document.getElementById('results-grid');
+  // Fila días de gracia (informativa — capital NO cambia)
+  const graciaMetric = S.dias_gracia > 0 ? [{
+    label: `Días de gracia (${S.dias_gracia} días)`,
+    val: `${diasEntreFechas(S.fecha_desembolso, S.fecha_primera)} días`,
+    sub: `Desembolso: ${formatFecha(S.fecha_desembolso)} → 1ª cuota: ${formatFecha(S.fecha_primera)} · Cuota 1 tiene período extendido · Capital: ${fmt(S.capital)} (sin cambio)`,
+    cls: 'amber', highlight: false
+  }] : [];
+
+  const metrics=[
+    ...graciaMetric,
+    {label:'Meses totales del préstamo',val:res.n_total,
+     sub:`Reducción: -${res.meses_menos} meses respecto al plazo original`,
+     cls:res.meses_menos>0?'green':'',highlight:res.meses_menos>0},
+    {label:res.tipo==='tiempo'?'Cuota mensual (inamovible)':'Cuota mensual nueva',
+     val:fmt(res.cuota_disp),
+     sub:res.tipo==='tiempo'?'Sin cambio — permanece exactamente igual que antes'
+       :`Antes: ${fmt(S.cuota_total)} · Ahorro mensual: ${fmt(res.dc)}`,
+     cls:res.tipo==='tiempo'?'':(res.dc>0?'green':'')},
+    {label:'Total intereses pagados',val:fmt(res.tot_int),
+     sub:S.intereses_orig>0?`Original: ${fmt(S.intereses_orig)}`:'',cls:''},
+    {label:'Total seguro pagado',val:fmt(res.tot_seg),
+     sub:S.seguro_total>0?`Original: ${fmt(S.seguro_total)}`:'',cls:''},
+    {label:'Ahorro en intereses',val:res.ahorro_int!==null?fmt(res.ahorro_int):'—',
+     sub:'Intereses que ya no pagarás',cls:'green',highlight:true},
+    {label:'Ahorro total (int + seg)',val:res.ahorro!==null?fmt(res.ahorro):'—',
+     sub:'Intereses + seguro ahorrado',cls:'green',highlight:res.ahorro>0},
   ];
-  grid.innerHTML = metrics.map(m => `
+  grid.innerHTML=metrics.map(m=>`
     <div class="metric ${m.highlight?'highlight':''}">
       <div class="m-label">${m.label}</div>
       <div class="m-val ${m.cls||''}">${m.val}</div>
       <div class="m-sub">${m.sub||''}</div>
     </div>`).join('');
 
-  if(S.intereses_orig > 0){
-    const barEl = document.getElementById('compare-bar');
-    const maxV  = S.intereses_orig + S.seguro_total;
-    const after = res.tot_int + res.tot_seg;
-    barEl.innerHTML = `
+  if(S.intereses_orig>0){
+    const barEl=document.getElementById('compare-bar');
+    const maxV=S.intereses_orig+S.seguro_total, after=res.tot_int+res.tot_seg;
+    barEl.innerHTML=`
       <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:10px">Comparación visual del costo total</div>
-      ${barRow('Sin amortizar', maxV, maxV, 'blue')}
-      ${barRow('Con amortización', after, maxV, 'green')}`;
+      ${barRow('Sin amortizar',maxV,maxV,'blue')}
+      ${barRow('Con amortización',after,maxV,'green')}`;
   }
-
   renderCronograma(crono);
-  renderComparativo(res, X, Y);
-  // Invalidar cronograma original para que se regenere al cambiar de pestaña
-  const tbl_orig = document.getElementById('crono-table-original');
-  if(tbl_orig) tbl_orig.innerHTML = '';
+  renderComparativo(res,X,Y);
+  const tbl_orig=document.getElementById('crono-table-original');
+  if(tbl_orig) tbl_orig.innerHTML='';
 }
 
-function barRow(label, val, max, cls){
-  const pct = Math.round(val/max*100);
+function barRow(label,val,max,cls){
+  const pct=Math.round(val/max*100);
   return `<div class="bar-row">
     <div class="bar-label">${label}</div>
     <div class="bar-track"><div class="bar-fill ${cls}" style="width:${pct}%"></div></div>
@@ -1074,9 +1159,11 @@ function barRow(label, val, max, cls){
 }
 
 function renderCronograma(crono){
-  const table = document.getElementById('crono-table');
-  const thead = `<thead><tr>
+  const tieneFeachas = S.usa_dias_reales && S.fecha_primera;
+  const table=document.getElementById('crono-table');
+  const thead=`<thead><tr>
     <th>N°</th>
+    ${tieneFeachas?'<th>Fecha</th><th>Días</th>':''}
     <th style="text-align:left">Saldo inicial</th>
     <th>Amortización</th>
     <th>Interés</th>
@@ -1084,58 +1171,69 @@ function renderCronograma(crono){
     <th>Cuota total</th>
     <th>Saldo final</th>
   </tr></thead>`;
-  let tbody = '<tbody>';
-  let tot_int=0, tot_amort=0, tot_seg=0, tot_cuota=0;
+  let tbody='<tbody>';
+  let tot_int=0,tot_amort=0,tot_seg=0,tot_cuota=0;
+  const colSpan=tieneFeachas?8:6;
 
-  crono.forEach(r => {
-    if(r.tipo_row === 'amort'){
-      tbody += `<tr class="amort-row"><td colspan="7" style="text-align:left;font-size:11px;padding:8px 10px">
-        ⚡ ${r.label} — ${fmt(r.monto)}</td></tr>`;
-    } else {
-      tot_int   += r.interes;
-      tot_amort += r.amort;
-      tot_seg   += r.seguro;
-      tot_cuota += r.cuota;
-      tbody += `<tr>
-        <td>${r.mes}</td>
-        <td style="text-align:left">${fmt(r.saldo_ini)}</td>
-        <td>${fmt(r.amort)}</td>
-        <td>${fmt(r.interes)}</td>
-        <td>${fmt(r.seguro)}</td>
-        <td class="green">${fmt(r.cuota)}</td>
-        <td>${fmt(r.saldo_fin)}</td>
+  const colTotal2 = tieneFeachas ? 9 : 7;
+  crono.forEach(r=>{
+    if(r.tipo_row==='dias_gracia'){
+      tbody+=`<tr style="background:var(--warn-light)">
+        <td colspan="${colTotal2}" style="text-align:left;font-size:11px;padding:8px 10px;color:var(--warn)">
+          📅 <strong>Período de días de gracia (${r.dias} días)</strong>
+          — Desembolso: ${formatFecha(r.fecha_desembolso)} → 1ª cuota: ${formatFecha(r.fecha_primera)}
+          — Período total cuota 1: <strong>${r.dt_c1} días</strong>
+          — Capital: <strong>${fmt(r.capital)} (sin cambio)</strong>
+        </td>
       </tr>`;
+      return;
     }
+    if(r.tipo_row==='amort'){
+      tbody+=`<tr class="amort-row"><td colspan="${colTotal2}" style="text-align:left;font-size:11px;padding:8px 10px">
+        ⚡ ${r.label} — ${fmt(r.monto)}</td></tr>`;
+      return;
+    }
+    tot_int+=r.interes; tot_amort+=r.amort; tot_seg+=r.seguro; tot_cuota+=r.cuota;
+    tbody+=`<tr>
+      <td>${r.mes}</td>
+      ${tieneFeachas?`<td style="font-size:11px;white-space:nowrap">${formatFecha(r.fecha)}</td><td style="font-size:11px">${r.dt}</td>`:''}
+      <td style="text-align:left">${fmt(r.saldo_ini)}</td>
+      <td>${fmt(r.amort)}</td>
+      <td>${fmt(r.interes)}</td>
+      <td>${fmt(r.seguro)}</td>
+      <td class="green">${fmt(r.cuota)}</td>
+      <td>${fmt(r.saldo_fin)}</td>
+    </tr>`;
   });
-  tbody += '</tbody>';
-  const tfoot = `<tfoot><tr>
-    <td>Total</td><td></td>
+  tbody+='</tbody>';
+  const tfoot=`<tfoot><tr>
+    <td>Total</td>
+    ${tieneFeachas?'<td></td><td></td>':''}
+    <td></td>
     <td>${fmt(tot_amort)}</td>
     <td>${fmt(tot_int)}</td>
     <td>${fmt(tot_seg)}</td>
     <td>${fmt(tot_cuota)}</td>
     <td></td>
   </tr></tfoot>`;
-  table.innerHTML = thead + tbody + tfoot;
+  table.innerHTML=thead+tbody+tfoot;
 }
 
-function renderComparativo(res, X, Y){
-  const el = document.getElementById('comparativo-content');
-  if(S.intereses_orig <= 0){
-    el.innerHTML = '<div class="alert info">Ingresa el total de intereses originales para ver el comparativo completo.</div>';
+function renderComparativo(res,X,Y){
+  const el=document.getElementById('comparativo-content');
+  if(S.intereses_orig<=0){
+    el.innerHTML='<div class="alert info">Ingresa el total de intereses originales para ver el comparativo completo.</div>';
     return;
   }
-  const Z = S.monto_Z;
-  const scenarios = [
-    { tipo:'tiempo',      label:'Todo a tiempo (máx. ahorro)', xi: Z, yi: 0 },
-    { tipo:'cuota',       label:'Todo a cuota (máx. bajada cuota)', xi: 0, yi: Z },
-    { tipo: res.tipo,     label:'Tu elección actual', xi: X, yi: Y, current: true },
+  const Z=S.monto_Z;
+  const scenarios=[
+    {tipo:'tiempo',label:'Todo a tiempo (máx. ahorro)',xi:Z,yi:0},
+    {tipo:'cuota', label:'Todo a cuota (máx. bajada cuota)',xi:0,yi:Z},
+    {tipo:res.tipo,label:'Tu elección actual',xi:X,yi:Y,current:true},
   ];
-  // deduplicar por tipo
-  const seen = new Set();
-  const unique = scenarios.filter(s => { if(seen.has(s.tipo)) return false; seen.add(s.tipo); return true; });
-
-  let html = `<div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:14px">Comparativo de escenarios</div>
+  const seen=new Set();
+  const unique=scenarios.filter(s=>{ if(seen.has(s.tipo)) return false; seen.add(s.tipo); return true; });
+  let html=`<div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:14px">Comparativo de escenarios</div>
   <table style="width:100%;border-collapse:collapse;font-size:12px">
   <thead><tr style="border-bottom:1.5px solid var(--border)">
     <th style="text-align:left;padding:6px 8px;font-size:11px;color:var(--text3)">Escenario</th>
@@ -1144,13 +1242,12 @@ function renderComparativo(res, X, Y){
     <th style="text-align:right;padding:6px 8px;font-size:11px;color:var(--text3)">Cuota</th>
     <th style="text-align:right;padding:6px 8px;font-size:11px;color:var(--text3)">↓ Cuota</th>
   </tr></thead><tbody>`;
-
-  unique.forEach(sc => {
-    const r = simTodo(sc.tipo, sc.xi, sc.yi);
+  unique.forEach(sc=>{
+    const r=simTodo(sc.tipo,sc.xi,sc.yi);
     if(!r) return;
-    const bg = sc.current ? 'background:var(--accent-light);font-weight:500' : '';
-    const dcStr = r.dc > 0.5 ? '-'+fmt(r.dc) : '—';
-    html += `<tr style="${bg}">
+    const bg=sc.current?'background:var(--accent-light);font-weight:500':'';
+    const dcStr=r.dc>0.5?'-'+fmt(r.dc):'—';
+    html+=`<tr style="${bg}">
       <td style="padding:7px 8px;border-bottom:1px solid var(--border)">${sc.label}${sc.current?' <span class="tag green">actual</span>':''}</td>
       <td style="padding:7px 8px;border-bottom:1px solid var(--border);text-align:right;font-family:'DM Mono',monospace;color:var(--accent)">${r.ahorro!==null?fmt(r.ahorro):'—'}</td>
       <td style="padding:7px 8px;border-bottom:1px solid var(--border);text-align:right;font-family:'DM Mono',monospace">${r.n_total}</td>
@@ -1158,91 +1255,84 @@ function renderComparativo(res, X, Y){
       <td style="padding:7px 8px;border-bottom:1px solid var(--border);text-align:right;font-family:'DM Mono',monospace;color:${r.dc>0.5?'var(--accent)':'var(--text2)'}">${dcStr}</td>
     </tr>`;
   });
-  html += '</tbody></table>';
-  el.innerHTML = html;
+  html+='</tbody></table>';
+  el.innerHTML=html;
 }
 
 // ════════════════════════════════════════════════════════════════
 // TABS
 // ════════════════════════════════════════════════════════════════
 function showTab(name){
-  document.querySelectorAll('.tab-btn').forEach((b,i) => {
-    const names = ['resumen','cronograma','cronograma-original','comparativo'];
-    b.classList.toggle('active', names[i] === name);
+  document.querySelectorAll('.tab-btn').forEach((b,i)=>{
+    const names=['resumen','cronograma','cronograma-original','comparativo'];
+    b.classList.toggle('active',names[i]===name);
   });
-  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c=>c.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
-  // Renderizar cronograma original bajo demanda (solo la primera vez)
-  if(name === 'cronograma-original'){
-    const tbl = document.getElementById('crono-table-original');
+  if(name==='cronograma-original'){
+    const tbl=document.getElementById('crono-table-original');
     if(!tbl.innerHTML) renderCronogramaOriginal();
   }
 }
 
 // ════════════════════════════════════════════════════════════════
-// CRONOGRAMA ORIGINAL — construye el cronograma sin amortización
-// usando el modelo correcto de cuota total fija
+// CRONOGRAMA ORIGINAL
 // ════════════════════════════════════════════════════════════════
 function buildCronogramaOriginal(){
-  const tem  = S.tem;
-  const ts   = S.tasa_seguro;
-  const ctot = S.cuota_total;
-  const rows = [];
-  let saldo  = S.capital;
-
-  // Iterar hasta que el saldo se agote (puede ser < plazo si la cuota está redondeada)
-  // esUltima se activa cuando la amortización normal superaría el saldo pendiente.
-  for(let i = 1; i <= S.plazo + 1; i++){
-    if(saldo < 0.005) break;
-    const int_i    = saldo * tem;
-    const seg_i    = saldo * ts;
-    const amort_n  = ctot - int_i - seg_i;
-    const esUltima = (amort_n >= saldo); // la cuota normal agotaría o excedería el saldo
-    let amort_i, cuota_i, sf;
-    if(esUltima){
-      amort_i = saldo;
-      cuota_i = saldo + int_i + seg_i;
-      sf = 0;
-    } else {
-      amort_i = amort_n;
-      cuota_i = ctot;
-      sf = saldo - amort_i;
-    }
-    rows.push({ mes: i, saldo_ini: saldo, interes: int_i, amort: amort_i,
-                seguro: seg_i, cuota: cuota_i, saldo_fin: Math.max(0, sf) });
-    saldo = Math.max(0, sf);
-    if(esUltima) break;
+  const tea=S.tea, ts=S.tasa_seguro, ctot=S.cuota_total;
+  const fp=S.fecha_primera, udr=S.usa_dias_reales;
+  const rows=[];
+  // Fila informativa: período de días de gracia
+  if(S.dias_gracia > 0){
+    rows.push({
+      tipo_row: 'dias_gracia',
+      dias: S.dias_gracia,
+      fecha_desembolso: S.fecha_desembolso,
+      fecha_primera: S.fecha_primera,
+      capital: S.capital,
+      dt_c1: diasEntreFechas(S.fecha_desembolso, S.fecha_primera)
+    });
+  }
+  let saldo = S.capital;
+  for(let n=1; n<=S.plazo+1; n++){
+    if(saldo<0.005) break;
+    const fAct=udr&&fp?fechaCuotaN(fp,n):null;
+    const dt=udr&&fp?dtDeCuota(n,fp):30;
+    const tem_n=udr&&fp?factorInteres(tea,dt):Math.pow(1+tea,1/12)-1;
+    const int_i=saldo*tem_n, seg_i=saldo*ts, amort_n=ctot-int_i-seg_i;
+    const esUlt=(amort_n>=saldo);
+    let amort_i,cuota_i,sf;
+    if(esUlt){ amort_i=saldo; cuota_i=saldo+int_i+seg_i; sf=0; }
+    else      { amort_i=amort_n; cuota_i=ctot; sf=saldo-amort_i; }
+    rows.push({mes:n,fecha:fAct,dt,saldo_ini:saldo,interes:int_i,
+               amort:amort_i,seguro:seg_i,cuota:cuota_i,saldo_fin:Math.max(0,sf)});
+    saldo=Math.max(0,sf);
+    if(esUlt) break;
   }
   return rows;
 }
 
 function renderCronogramaOriginal(){
-  const crono = buildCronogramaOriginal();
-  const n_generadas = crono.length;
+  const crono=buildCronogramaOriginal();
+  const n_generadas=crono.length;
+  const tieneFeachas=S.usa_dias_reales&&S.fecha_primera;
 
-  // ── Nota dinámica en el header ────────────────────────────────
-  const notaEl = document.querySelector('#tab-cronograma-original .alert.info');
+  const notaEl=document.querySelector('#tab-cronograma-original .alert.info');
   if(notaEl){
-    const tiene_datos_banco = S.intereses_orig > 0 || S.seguro_total > 0;
-    let notaExtra = '';
-    if(n_generadas !== S.plazo){
-      notaExtra = `<br><strong>Cuotas:</strong> El modelo genera <strong>${n_generadas} cuotas</strong>
-        con la cuota ingresada de ${fmt(S.cuota_total)}.
-        El banco indicó <strong>${S.plazo} cuotas</strong>.
-        La diferencia de ${Math.abs(S.plazo - n_generadas)} cuota(s) se debe al redondeo interno de la cuota —
-        ingresar más decimales reduce esta diferencia.`;
-    }
-    if(tiene_datos_banco){
-      notaExtra += `<br><strong>Intereses:</strong> El modelo calcula los intereses a partir de la TEA y la cuota ingresada.
-        Si los intereses calculados difieren de los del banco, es porque el banco usa una cuota interna con más decimales.
-        Esta diferencia no afecta el cálculo del ahorro, que usa el mismo modelo de forma consistente.`;
-    }
-    notaEl.innerHTML = `Cronograma original sin amortización extraordinaria. Referencia para comparar contra el cronograma actualizado.${notaExtra}`;
+    const tiene_datos=S.intereses_orig>0||S.seguro_total>0;
+    let notaExtra='';
+    const modoStr=tieneFeachas?`<strong>Modo días reales activado</strong> — fechas y días reales visibles en el cronograma. `:'';
+    if(n_generadas!==S.plazo)
+      notaExtra+=`<br><strong>Cuotas:</strong> El modelo genera <strong>${n_generadas} cuotas</strong> con la cuota ingresada de ${fmt(S.cuota_total)}. El banco indicó <strong>${S.plazo} cuotas</strong>. Diferencia de ${Math.abs(S.plazo-n_generadas)} cuota(s) por redondeo interno.`;
+    if(tiene_datos)
+      notaExtra+=`<br><strong>Intereses:</strong> Los calculados difieren de los del banco por el redondeo interno de la cuota. Esta diferencia no afecta el cálculo del ahorro.`;
+    notaEl.innerHTML=`${modoStr}Cronograma original sin amortización extraordinaria. Referencia para comparar contra el cronograma actualizado.${notaExtra}`;
   }
 
-  const table = document.getElementById('crono-table-original');
-  const thead = `<thead><tr>
+  const table=document.getElementById('crono-table-original');
+  const thead=`<thead><tr>
     <th>N°</th>
+    ${tieneFeachas?'<th>Fecha</th><th>Días</th>':''}
     <th style="text-align:left">Saldo inicial</th>
     <th>Amortización</th>
     <th>Interés</th>
@@ -1250,16 +1340,26 @@ function renderCronogramaOriginal(){
     <th>Cuota total</th>
     <th>Saldo final</th>
   </tr></thead>`;
-  let tbody = '<tbody>';
-  let tot_int=0, tot_amort=0, tot_seg=0, tot_cuota=0;
-
-  crono.forEach(r => {
-    tot_int   += r.interes;
-    tot_amort += r.amort;
-    tot_seg   += r.seguro;
-    tot_cuota += r.cuota;
-    tbody += `<tr>
+  let tbody='<tbody>';
+  let tot_int=0,tot_amort=0,tot_seg=0,tot_cuota=0;
+  const colTotal = tieneFeachas ? 9 : 7;
+  crono.forEach(r=>{
+    if(r.tipo_row === 'dias_gracia'){
+      tbody+=`<tr style="background:var(--warn-light)">
+        <td colspan="${colTotal}" style="text-align:left;font-size:11px;padding:8px 10px;color:var(--warn)">
+          📅 <strong>Período de días de gracia (${r.dias} días)</strong>
+          — Desembolso: ${formatFecha(r.fecha_desembolso)} → 1ª cuota: ${formatFecha(r.fecha_primera)}
+          — Período total cuota 1: <strong>${r.dt_c1} días</strong>
+          — Capital del préstamo: <strong>${fmt(r.capital)} (sin cambio)</strong>
+          — El interés mayor de la cuota 1 refleja el período extendido.
+        </td>
+      </tr>`;
+      return;
+    }
+    tot_int+=r.interes; tot_amort+=r.amort; tot_seg+=r.seguro; tot_cuota+=r.cuota;
+    tbody+=`<tr>
       <td>${r.mes}</td>
+      ${tieneFeachas?`<td style="font-size:11px;white-space:nowrap">${formatFecha(r.fecha)}</td><td style="font-size:11px">${r.dt}</td>`:''}
       <td style="text-align:left">${fmt(r.saldo_ini)}</td>
       <td>${fmt(r.amort)}</td>
       <td>${fmt(r.interes)}</td>
@@ -1268,26 +1368,23 @@ function renderCronogramaOriginal(){
       <td>${fmt(r.saldo_fin)}</td>
     </tr>`;
   });
-  tbody += '</tbody>';
+  tbody+='</tbody>';
 
-  // ── Footer doble: Calculado vs Según banco ────────────────────
-  const tiene_int_banco  = S.intereses_orig > 0;
-  const tiene_seg_banco  = S.seguro_total   > 0;
-  const diff_int = tiene_int_banco  ? tot_int  - S.intereses_orig : null;
-  const diff_seg = tiene_seg_banco  ? tot_seg  - S.seguro_total   : null;
-  const diff_amort = tot_amort - S.capital;
-
-  const fmtDiff = (d) => {
-    if(d === null) return '—';
-    const abs = Math.abs(d);
-    const sign = d >= 0 ? '+' : '-';
-    const color = Math.abs(d) < 1 ? 'var(--accent)' : 'var(--warn)';
-    return `<span style="color:${color};font-size:10px">${sign}${fmt(abs)}</span>`;
+  const tiene_int_banco=S.intereses_orig>0, tiene_seg_banco=S.seguro_total>0;
+  const diff_int=tiene_int_banco?tot_int-S.intereses_orig:null;
+  const diff_seg=tiene_seg_banco?tot_seg-S.seguro_total:null;
+  const diff_amort=tot_amort-S.capital;
+  const fmtDiff=d=>{
+    if(d===null) return '—';
+    const sign=d>=0?'+':'-', color=Math.abs(d)<1?'var(--accent)':'var(--warn)';
+    return `<span style="color:${color};font-size:10px">${sign}${fmt(Math.abs(d))}</span>`;
   };
 
-  let tfoot = `<tfoot>
+  let tfoot=`<tfoot>
     <tr style="background:var(--surface2)">
-      <td style="font-weight:600;font-size:11px">Calculado</td><td></td>
+      <td style="font-weight:600;font-size:11px">Calculado</td>
+      ${tieneFeachas?'<td></td><td></td>':''}
+      <td></td>
       <td style="font-weight:600">${fmt(tot_amort)}</td>
       <td style="font-weight:600">${fmt(tot_int)}</td>
       <td style="font-weight:600">${fmt(tot_seg)}</td>
@@ -1295,63 +1392,75 @@ function renderCronogramaOriginal(){
       <td></td>
     </tr>`;
 
-  if(tiene_int_banco || tiene_seg_banco){
-    const int_banco_str  = tiene_int_banco  ? fmt(S.intereses_orig) : '—';
-    const seg_banco_str  = tiene_seg_banco  ? fmt(S.seguro_total)   : '—';
-    const amort_banco_str = fmt(S.capital);
-    const cuota_banco_str = (tiene_int_banco && tiene_seg_banco)
-      ? fmt(S.capital + S.intereses_orig + S.seguro_total) : '—';
-    tfoot += `
+  if(tiene_int_banco||tiene_seg_banco){
+    const int_b=tiene_int_banco?fmt(S.intereses_orig):'—';
+    const seg_b=tiene_seg_banco?fmt(S.seguro_total):'—';
+    const cuota_b=(tiene_int_banco&&tiene_seg_banco)?fmt(S.capital+S.intereses_orig+S.seguro_total):'—';
+    tfoot+=`
     <tr style="background:var(--info-light)">
-      <td style="font-weight:600;font-size:11px;color:var(--info)">Según banco</td><td></td>
-      <td style="color:var(--info)">${amort_banco_str}</td>
-      <td style="color:var(--info)">${int_banco_str}</td>
-      <td style="color:var(--info)">${seg_banco_str}</td>
-      <td style="color:var(--info)">${cuota_banco_str}</td>
+      <td style="font-weight:600;font-size:11px;color:var(--info)">Según banco</td>
+      ${tieneFeachas?'<td></td><td></td>':''}
+      <td></td>
+      <td style="color:var(--info)">${fmt(S.capital)}</td>
+      <td style="color:var(--info)">${int_b}</td>
+      <td style="color:var(--info)">${seg_b}</td>
+      <td style="color:var(--info)">${cuota_b}</td>
       <td></td>
     </tr>
     <tr style="background:var(--surface2);border-top:1px dashed var(--border)">
-      <td style="font-size:10px;color:var(--text3)">Diferencia</td><td></td>
-      <td>${fmtDiff(diff_amort < 0.01 ? 0 : diff_amort)}</td>
+      <td style="font-size:10px;color:var(--text3)">Diferencia</td>
+      ${tieneFeachas?'<td></td><td></td>':''}
+      <td></td>
+      <td>${fmtDiff(diff_amort<0.01?0:diff_amort)}</td>
       <td>${fmtDiff(diff_int)}</td>
       <td>${fmtDiff(diff_seg)}</td>
       <td>—</td>
       <td></td>
     </tr>`;
   }
-  tfoot += '</tfoot>';
-  table.innerHTML = thead + tbody + tfoot;
+  tfoot+='</tfoot>';
+  table.innerHTML=thead+tbody+tfoot;
 }
 
 // ════════════════════════════════════════════════════════════════
 // TOGGLE PLAZO: MESES vs FECHAS
 // ════════════════════════════════════════════════════════════════
 function switchPlazo(modo){
-  const esFechas = modo === 'fechas';
-  document.getElementById('toggle-meses').classList.toggle('active', !esFechas);
-  document.getElementById('toggle-fechas').classList.toggle('active', esFechas);
-  document.getElementById('plazo-meses-wrap').classList.toggle('hidden', esFechas);
-  document.getElementById('plazo-fechas-wrap').classList.toggle('visible', esFechas);
-  document.getElementById('plazo-calculado').textContent = '';
+  const esFechas=modo==='fechas';
+  document.getElementById('toggle-meses').classList.toggle('active',!esFechas);
+  document.getElementById('toggle-fechas').classList.toggle('active',esFechas);
+  document.getElementById('plazo-meses-wrap').classList.toggle('hidden',esFechas);
+  document.getElementById('plazo-fechas-wrap').classList.toggle('visible',esFechas);
+  document.getElementById('plazo-calculado').textContent='';
 }
 
-function calcularPlazoFechas(){
-  const ini = document.getElementById('fecha_inicio').value;
-  const fin = document.getElementById('fecha_fin').value;
-  const el  = document.getElementById('plazo-calculado');
-  if(!ini || !fin){ el.textContent = ''; return 0; }
-  const [yI, mI] = ini.split('-').map(Number);
-  const [yF, mF] = fin.split('-').map(Number);
-  const meses = (yF - yI) * 12 + (mF - mI) + 1;
-  if(meses < 1){
-    el.textContent = '⚠ La fecha de término debe ser posterior a la de inicio';
-    el.style.color = 'var(--warn)';
-    document.getElementById('plazo').value = '';
+function onFechaPrimeraChange(){
+  const val=document.getElementById('fecha_primera_cuota').value;
+  const el=document.getElementById('fecha-primera-label');
+  if(!val){ el.textContent=''; return; }
+  const [y,m,d]=val.split('-').map(Number);
+  const fecha=new Date(y,m-1,d);
+  el.textContent=`Días reales activados — 1ª cuota: ${formatFecha(fecha)}`;
+  el.style.color='var(--accent)';
+}
+
+function calcularPlazoFechasExact(){
+  const ini=document.getElementById('fecha_inicio_exact').value;
+  const fin=document.getElementById('fecha_fin_exact').value;
+  const el=document.getElementById('plazo-calculado');
+  if(!ini||!fin){ el.textContent=''; return 0; }
+  const [yI,mI,dI]=ini.split('-').map(Number);
+  const [yF,mF,dF]=fin.split('-').map(Number);
+  const meses=(yF-yI)*12+(mF-mI)+(dF>=dI?1:0); // si mismo dia o posterior: incluye ambos meses
+  if(meses<1){
+    el.textContent='⚠ La fecha de término debe ser posterior a la de inicio';
+    el.style.color='var(--warn)';
+    document.getElementById('plazo').value='';
     return 0;
   }
-  el.style.color = 'var(--accent)';
-  el.textContent = `Plazo calculado: ${meses} meses`;
-  document.getElementById('plazo').value = meses;
+  el.style.color='var(--accent)';
+  el.textContent=`Plazo calculado: ${meses} meses · Días reales activados`;
+  document.getElementById('plazo').value=meses;
   return meses;
 }
 
