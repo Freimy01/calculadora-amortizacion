@@ -201,6 +201,105 @@ header p { font-size: 13px; color: var(--text2); margin-top: 4px; }
 .plazo-meses { display: block; }
 .plazo-meses.hidden { display: none; }
 .fecha-calculada { margin-top: 6px; font-size: 12px; color: var(--accent); font-weight: 500; font-family: 'DM Mono', monospace; min-height: 18px; }
+
+/* ══════════════════════ MODAL PRINT: highlight selección ══ */
+#modal-print input[type=radio]:checked + div {
+  color: var(--accent);
+}
+#modal-print label:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-light);
+}
+
+/* ══════════════════════ @MEDIA PRINT ══════════════════════ */
+@media print {
+  /* Reset básico */
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+  body { background: white !important; margin: 0; padding: 0; font-size: 11px; }
+
+  /* Ocultar todo excepto la zona de impresión */
+  .steps, .btn-row, .tab-bar, #modal-print,
+  #sec1, #sec2,
+  .alert.info { display: none !important; }
+
+  /* Mostrar solo la sección 3 */
+  #sec3 { display: block !important; }
+  #sec3 .card { box-shadow: none !important; border: none !important; padding: 0 !important; }
+  .card-title { font-size: 14px; border-bottom: 1.5px solid #333; padding-bottom: 6px; margin-bottom: 12px; }
+
+  /* Tabs: ocultar la barra, mostrar solo el contenido marcado para imprimir */
+  .tab-content { display: none !important; }
+  .tab-content.print-include { display: block !important; page-break-inside: avoid; }
+
+  /* Separación entre secciones al imprimir */
+  .tab-content.print-include + .tab-content.print-include {
+    page-break-before: always;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid #ccc;
+  }
+
+  /* Cronogramas: mostrar tabla completa sin scroll */
+  .crono-scroll {
+    max-height: none !important;
+    overflow: visible !important;
+    border: none !important;
+  }
+  .crono-wrap {
+    overflow: visible !important;
+  }
+  .crono-table {
+    width: 100%;
+    font-size: 10px;
+    border-collapse: collapse;
+    page-break-inside: auto;
+  }
+  .crono-table tr { page-break-inside: avoid; page-break-after: auto; }
+  .crono-table thead { display: table-header-group; }
+  .crono-table tfoot { display: table-footer-group; }
+  .crono-table th, .crono-table td {
+    border: 0.5px solid #ccc !important;
+    padding: 2px 5px !important;
+    white-space: nowrap;
+  }
+  .crono-table thead th { background: #f0f0f0 !important; font-weight: 600; }
+  .crono-table tfoot td { background: #e8e8e8 !important; font-weight: 600; }
+  .crono-table tr.amort-row td { background: #fffbe6 !important; }
+
+  /* Métricas del resumen */
+  .results-grid {
+    display: grid !important;
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 8px !important;
+  }
+  .metric {
+    border: 1px solid #ddd !important;
+    padding: 8px !important;
+    border-radius: 4px !important;
+    box-shadow: none !important;
+  }
+  .metric.highlight { background: #f0faf5 !important; }
+
+  /* Barras comparativas */
+  .bar-row { margin-bottom: 6px; }
+  .bar-track { background: #eee !important; }
+  .bar-fill.blue  { background: #2d6a4f !important; }
+  .bar-fill.green { background: #52b788 !important; }
+
+  /* Encabezado de cada sección impresa */
+  .print-section-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #333;
+    border-bottom: 1px solid #aaa;
+    padding-bottom: 4px;
+    margin-bottom: 10px;
+  }
+
+  /* Comparativo */
+  #comparativo-content table { width: 100%; font-size: 10px; }
+  #comparativo-content td, #comparativo-content th { padding: 3px 6px !important; }
+}
 </style>
 </head>
 <body>
@@ -443,9 +542,61 @@ header p { font-size: 13px; color: var(--text2); margin-top: 4px; }
     </div>
     <div class="btn-row" style="justify-content:space-between; margin-top:0;">
       <button class="btn btn-secondary" onclick="goStep(2)">← Volver</button>
-      <button class="btn btn-primary" onclick="window.print()">Imprimir / Guardar PDF</button>
+      <button class="btn btn-primary" onclick="abrirModalImprimir()">🖨 Imprimir / Guardar PDF</button>
     </div>
   </div>
+
+<!-- ══════════════════════════════════════ MODAL IMPRIMIR -->
+<div id="modal-print" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border-radius:var(--radius);padding:28px 32px;max-width:420px;width:90%;box-shadow:0 8px 40px rgba(0,0,0,0.18);">
+    <div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:6px">¿Qué deseas imprimir?</div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:20px">Selecciona las secciones a incluir en el PDF</div>
+
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:24px">
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);transition:border-color .15s" id="opt-todo-lbl">
+        <input type="radio" name="print-opt" value="todo" id="opt-todo" checked onchange="onPrintOptChange()" style="accent-color:var(--accent)">
+        <div>
+          <div style="font-size:13px;font-weight:500;color:var(--text)">Todo completo</div>
+          <div style="font-size:11px;color:var(--text3)">Resumen + Comparativo + Cronograma actualizado</div>
+        </div>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm)" id="opt-resumen-lbl">
+        <input type="radio" name="print-opt" value="resumen" id="opt-resumen" onchange="onPrintOptChange()" style="accent-color:var(--accent)">
+        <div>
+          <div style="font-size:13px;font-weight:500;color:var(--text)">Solo Resumen</div>
+          <div style="font-size:11px;color:var(--text3)">Métricas y gráfico comparativo de costo</div>
+        </div>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm)" id="opt-cronograma-lbl">
+        <input type="radio" name="print-opt" value="cronograma" id="opt-cronograma" onchange="onPrintOptChange()" style="accent-color:var(--accent)">
+        <div>
+          <div style="font-size:13px;font-weight:500;color:var(--text)">Solo Cronograma actualizado</div>
+          <div style="font-size:11px;color:var(--text3)">Plan de pagos completo con la amortización</div>
+        </div>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm)" id="opt-original-lbl">
+        <input type="radio" name="print-opt" value="original" id="opt-original" onchange="onPrintOptChange()" style="accent-color:var(--accent)">
+        <div>
+          <div style="font-size:13px;font-weight:500;color:var(--text)">Solo Cronograma original</div>
+          <div style="font-size:11px;color:var(--text3)">Cronograma sin amortización (referencia)</div>
+        </div>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm)" id="opt-comparativo-lbl">
+        <input type="radio" name="print-opt" value="comparativo" id="opt-comparativo" onchange="onPrintOptChange()" style="accent-color:var(--accent)">
+        <div>
+          <div style="font-size:13px;font-weight:500;color:var(--text)">Solo Comparativo de escenarios</div>
+          <div style="font-size:11px;color:var(--text3)">Tabla comparando tiempo vs cuota vs elección actual</div>
+        </div>
+      </label>
+    </div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button class="btn btn-secondary" onclick="cerrarModalImprimir()" style="min-width:90px">Cancelar</button>
+      <button class="btn btn-primary" onclick="ejecutarImpresion()" style="min-width:130px">🖨 Imprimir / PDF</button>
+    </div>
+  </div>
+</div>
+
 
 </div>
 
@@ -1523,6 +1674,77 @@ function calcularPlazoFechasExact(){
 
 // Init
 document.getElementById('cuota_desde').value = 1;
+
+// ════════════════════════════════════════════════════════════════
+// MODAL DE IMPRESIÓN
+// ════════════════════════════════════════════════════════════════
+function abrirModalImprimir(){
+  // Asegurarse de que el cronograma original esté renderizado si se va a imprimir
+  const modal = document.getElementById('modal-print');
+  modal.style.display = 'flex';
+  onPrintOptChange();
+}
+
+function cerrarModalImprimir(){
+  document.getElementById('modal-print').style.display = 'none';
+}
+
+function onPrintOptChange(){
+  const opts = ['todo','resumen','cronograma','original','comparativo'];
+  opts.forEach(o => {
+    const lbl = document.getElementById('opt-'+o+'-lbl');
+    if(lbl) lbl.style.borderColor = '';
+  });
+  const sel = document.querySelector('input[name=print-opt]:checked');
+  if(sel){
+    const lbl = document.getElementById('opt-'+sel.value+'-lbl');
+    if(lbl){ lbl.style.borderColor = 'var(--accent)'; lbl.style.background = 'var(--accent-light)'; }
+  }
+}
+
+function ejecutarImpresion(){
+  const opcion = document.querySelector('input[name=print-opt]:checked')?.value || 'todo';
+  cerrarModalImprimir();
+
+  // Si se va a imprimir el cronograma original y no está renderizado, renderizarlo
+  if(opcion === 'todo' || opcion === 'original'){
+    const tbl = document.getElementById('crono-table-original');
+    if(tbl && !tbl.innerHTML) renderCronogramaOriginal();
+  }
+
+  // Marcar qué secciones incluir en la impresión
+  const mapaSecciones = {
+    'todo':         ['tab-resumen','tab-comparativo','tab-cronograma'],
+    'resumen':      ['tab-resumen'],
+    'cronograma':   ['tab-cronograma'],
+    'original':     ['tab-cronograma-original'],
+    'comparativo':  ['tab-comparativo'],
+  };
+  const aIncluir = mapaSecciones[opcion] || ['tab-resumen'];
+
+  // Quitar clase de impresión anterior
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('print-include'));
+  // Agregar clase a las secciones seleccionadas
+  aIncluir.forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.classList.add('print-include');
+  });
+
+  // Esperar un tick para que el DOM se actualice antes de imprimir
+  setTimeout(() => {
+    window.print();
+    // Limpiar clases después de imprimir
+    setTimeout(() => {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('print-include'));
+    }, 500);
+  }, 100);
+}
+
+// Cerrar modal al hacer clic fuera
+document.getElementById('modal-print').addEventListener('click', function(e){
+  if(e.target === this) cerrarModalImprimir();
+});
+
 </script>
 </body>
 </html>
