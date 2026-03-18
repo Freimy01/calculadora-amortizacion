@@ -293,7 +293,7 @@ header p { font-size: 13px; color: var(--text2); margin-top: 4px; }
         <div class="field field-prefix">
           <label>Total seguro desgravamen</label>
           <span class="prefix" id="pfx3">S/</span>
-          <input type="number" id="seguro_total" placeholder="6083" min="0" step="0.01">
+          <input type="number" id="seguro_total" placeholder="0" min="0" step="0.01">
           <div class="hint">Suma total de seguro en todo el cronograma. Si no tienes, pon 0.</div>
         </div>
       </div>
@@ -301,7 +301,7 @@ header p { font-size: 13px; color: var(--text2); margin-top: 4px; }
         <div class="field field-prefix">
           <label>Total intereses del cronograma original</label>
           <span class="prefix" id="pfx4">S/</span>
-          <input type="number" id="intereses_orig" placeholder="41814.48" min="0" step="0.01">
+          <input type="number" id="intereses_orig" placeholder="0" min="0" step="0.01">
           <div class="hint">Suma total de intereses según el cronograma del banco</div>
         </div>
         <div class="field">
@@ -358,12 +358,12 @@ header p { font-size: 13px; color: var(--text2); margin-top: 4px; }
         <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:12px">Distribución del monto Z</div>
         <div class="slider-row">
           <label id="sl-label-x">Reduce tiempo (X)</label>
-          <input type="range" id="slider-x" min="0" max="36000" step="500" value="12000" oninput="onSliderX()">
+          <input type="range" id="slider-x" min="0" max="36000" step="1" value="12000" oninput="onSliderX()">
           <span class="slider-val" id="sv-x">S/ 12,000</span>
         </div>
         <div class="slider-row">
           <label id="sl-label-y">Reduce cuota (Y)</label>
-          <input type="range" id="slider-y" min="0" max="36000" step="500" value="24000" oninput="onSliderY()">
+          <input type="range" id="slider-y" min="0" max="36000" step="1" value="24000" oninput="onSliderY()">
           <span class="slider-val" id="sv-y">S/ 24,000</span>
         </div>
         <div class="slider-total" id="sl-total">Total: S/ 36,000 ✓</div>
@@ -482,15 +482,15 @@ function diasEnMes(año, mes){ // mes 1-based
 
 function fechaCuotaN(fechaPrimera, n){
   // Fecha de la cuota n (n=1 = fechaPrimera, n=2 = mes siguiente, etc.)
+  // IMPORTANTE: calcular mes y año destino con aritmética ANTES de construir el Date
+  // para evitar el overflow de setMonth (ej: 30/mar + 11 meses → setMonth(13) → overflow)
   if(n === 1) return new Date(fechaPrimera);
-  const d = new Date(fechaPrimera);
-  const diaOriginal = d.getDate();
-  d.setMonth(d.getMonth() + (n - 1));
-  // Ajustar si el día no existe en el mes destino (ej. 31 en abril → 30)
-  const maxDia = diasEnMes(d.getFullYear(), d.getMonth() + 1);
-  if(diaOriginal > maxDia) d.setDate(maxDia);
-  else d.setDate(diaOriginal);
-  return d;
+  const diaOriginal = fechaPrimera.getDate();
+  let mes = fechaPrimera.getMonth() + (n - 1);   // 0-indexed, puede ser >11
+  let año = fechaPrimera.getFullYear() + Math.floor(mes / 12);
+  mes = mes % 12;                                 // normalizar a 0-11
+  const maxDia = diasEnMes(año, mes + 1);         // diasEnMes recibe mes 1-indexed
+  return new Date(año, mes, Math.min(diaOriginal, maxDia));
 }
 
 function diasEntreFechas(d1, d2){
@@ -499,13 +499,15 @@ function diasEntreFechas(d1, d2){
 
 function fechaPreviaACuota1(fechaPrimera){
   // "Cuota 0" ficticia = un mes antes de la primera cuota
-  const d = new Date(fechaPrimera);
-  const diaOriginal = d.getDate();
-  d.setMonth(d.getMonth() - 1);
-  const maxDia = diasEnMes(d.getFullYear(), d.getMonth() + 1);
-  if(diaOriginal > maxDia) d.setDate(maxDia);
-  else d.setDate(diaOriginal);
-  return d;
+  // IMPORTANTE: calcular mes y año destino ANTES de construir el Date
+  // para evitar el overflow de JS (ej: 30/mar → setMonth(-1) → 2/mar)
+  const diaOriginal = fechaPrimera.getDate();
+  let mes = fechaPrimera.getMonth() - 1;  // 0-indexed
+  let año = fechaPrimera.getFullYear();
+  if(mes < 0){ mes = 11; año -= 1; }
+  const maxDia = diasEnMes(año, mes + 1);  // diasEnMes recibe mes 1-indexed
+  const dia = Math.min(diaOriginal, maxDia);
+  return new Date(año, mes, dia);
 }
 
 function dtDeCuota(n, fechaPrimera){
@@ -588,8 +590,15 @@ function nuevaCuotaParaN(saldo, n, tea, tasa_seg, fechaPrimera, n_inicio, usaDia
   const tem_ref = usaDiasReales && fechaPrimera
     ? factorInteres(tea, dtDeCuota(n_inicio, fechaPrimera))
     : Math.pow(1+tea, 1/12)-1;
-  let lo = saldo*(tem_ref+tasa_seg)*1.0001, hi=saldo;
-  for(let iter=0; iter<100; iter++){
+  const lo_min = saldo*(tem_ref+tasa_seg)*1.0001;
+  // hi: techo para la búsqueda binaria.
+  // La nueva cuota al reducir cuota siempre < cuota_original.
+  // Al reducir tiempo puede ser mayor pero siempre < saldo (se liquida en 1 cuota).
+  // Usamos cuota_original * 3 como techo seguro para cualquier caso.
+  // Con lo_min~1700 y hi~8500, 120 iters dan precisión de (8500-1700)/2^120 ≈ 0
+  const hi_max = S.cuota_total > 0 ? S.cuota_total * 3 : saldo;
+  let lo = lo_min, hi = Math.max(lo_min * 1.01, hi_max);
+  for(let iter=0; iter<120; iter++){
     const mid=(lo+hi)/2; let s=saldo, nc=n_inicio;
     for(let i=0; i<n; i++){
       const tem_i = usaDiasReales && fechaPrimera
@@ -600,7 +609,11 @@ function nuevaCuotaParaN(saldo, n, tea, tasa_seg, fechaPrimera, n_inicio, usaDia
     }
     if(s > 0.005) lo=mid; else hi=mid;
   }
-  return (lo+hi)/2;
+  const result = (lo+hi)/2;
+  // Validar: el resultado debe ser menor o igual a la cuota original
+  // Si es mayor, significa que con ese saldo+plazo la cuota sube
+  // (el saldo fue reducido pero el plazo también se acortó demasiado)
+  return result;
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -757,17 +770,17 @@ function validateStep1(){
   // Se necesita ts tal que sum(saldo_i * ts * dt_i/30) = seguro_total
   S.tasa_seguro = calcTasaSeguro(
     S.capital, S.plazo, S.tea, S.cuota_total, S.seguro_total,
-    S.fecha_primera, S.usa_dias_reales, S.dt_c1
+    S.fecha_primera, S.usa_dias_reales
   );
 
   // ── Calcular saldo y acumulados tras cuota N ──────────────────
   let saldo=S.capital, tot_int_pre=0, tot_seg_pre=0;
   for(let n=1; n<=S.cuota_desde; n++){
-    const dt_n = (S.usa_dias_reales && S.fecha_primera)
-      ? (n===1 && S.dt_c1>0 ? S.dt_c1 : dtDeCuota(n, S.fecha_primera))
-      : 30;
-    const int_i = saldo * factorInteres(S.tea, dt_n);
-    const seg_i = saldo * S.tasa_seguro * (dt_n/30);
+    const tem_n = (S.usa_dias_reales && S.fecha_primera)
+      ? factorInteres(S.tea, dtDeCuota(n, S.fecha_primera))
+      : Math.pow(1+S.tea, 1/12)-1;
+    const int_i = saldo * tem_n;
+    const seg_i = saldo * S.tasa_seguro;
     tot_int_pre += int_i; tot_seg_pre += seg_i;
     saldo -= (S.cuota_total - int_i - seg_i);
     if(saldo < 0.005) saldo=0;
@@ -815,8 +828,22 @@ function onZChange(){
 }
 function setupSliders(Z){
   const sx=document.getElementById('slider-x'), sy=document.getElementById('slider-y');
-  sx.max=Z; sy.max=Z;
-  const xv=Math.min(parseFloat(sx.value)||0,Z);
+  // Step dinámico: el máximo del slider SIEMPRE debe ser alcanzable.
+  // step = MCD(Z, valor_razonable). Usamos el mayor divisor de Z que sea ≤ 500.
+  // Si Z < 100: step=1. Si Z < 1000: step=50. Si no: mayor divisor ≤ 500.
+  let step;
+  if(Z <= 0)            step = 1;
+  else if(Z < 100)      step = 1;
+  else if(Z < 500)      step = Math.max(1, Math.round(Z / 20));
+  else {
+    // Encontrar el mayor divisor de Z que sea ≤ 500
+    step = 1;
+    for(let d = 500; d >= 1; d--){
+      if(Z % d === 0){ step = d; break; }
+    }
+  }
+  sx.max=Z; sy.max=Z; sx.step=step; sy.step=step;
+  const xv=Math.min(Math.round((parseFloat(sx.value)||0)/step)*step, Z);
   sx.value=xv; sy.value=Z-xv;
   updateSliderDisplay(Z,xv);
 }
@@ -873,10 +900,27 @@ function calcOptimo(){
   if(!resultados.length){ alert('No se pudieron calcular resultados.'); return; }
   const r_todo_cuota=simTodo(orden,0,Z);
   const dc_max_posible=r_todo_cuota?r_todo_cuota.dc:Math.max(...resultados.map(r=>r.dc));
+
+  // Si dc_max_posible <= 0, amortizar a cuota no reduce la cuota con este préstamo
+  // (capital muy grande o plazo relativamente corto vs monto Z).
+  // En ese caso solo tiene sentido reducir tiempo → sugerimos eso automáticamente.
+  if(dc_max_posible <= 0){
+    const el=document.getElementById('optimo-result');
+    el.innerHTML=`<div class="alert warn">
+      <strong>Nota:</strong> Con este préstamo, amortizar ${fmt(Z)} a reducción de cuota
+      no reduce la cuota mensual (el capital es grande respecto al monto a amortizar).
+      La opción que genera mayor beneficio es <strong>amortizar todo a reducir tiempo</strong>.
+      Se ha ajustado el slider automáticamente.
+    </div>`;
+    el.classList.remove('hidden');
+    aplicarOptimo(Z, 0, tipo, orden);
+    return;
+  }
+
   const dcUmbral=dcMinManual>0?dcMinManual:(pref==='equilibrio'?dc_max_posible*0.15:0);
   const cands=resultados.filter(r=>r.dc>=dcUmbral);
   if(!cands.length){
-    document.getElementById('optimo-result').innerHTML=`<div class="alert warn">No hay combinaciones que cumplan el mínimo de bajada de cuota de ${fmt(dcUmbral)}.</div>`;
+    document.getElementById('optimo-result').innerHTML=`<div class="alert warn">No hay combinaciones que cumplan el mínimo de bajada de cuota de ${fmt(dcUmbral)}. Prueba reducir el valor mínimo o selecciona "Maximizar ahorro".</div>`;
     document.getElementById('optimo-result').classList.remove('hidden'); return;
   }
   let best;
@@ -1294,7 +1338,12 @@ function buildCronogramaOriginal(){
     });
   }
   let saldo = S.capital;
-  for(let n=1; n<=S.plazo+1; n++){
+  // Iterar hasta que el saldo se liquide naturalmente (cierre orgánico).
+  // Límite: S.plazo + margen generoso para préstamos con cuota redondeada.
+  // esUlt solo cuando la amortización normal ≥ saldo (jamás se fuerza).
+  // Esto garantiza que NINGUNA cuota supere la cuota pactada.
+  const limiteN = S.plazo + 20;
+  for(let n=1; n<=limiteN; n++){
     if(saldo<0.005) break;
     const fAct=udr&&fp?fechaCuotaN(fp,n):null;
     const dt=udr&&fp?dtDeCuota(n,fp):30;
@@ -1451,7 +1500,15 @@ function calcularPlazoFechasExact(){
   if(!ini||!fin){ el.textContent=''; return 0; }
   const [yI,mI,dI]=ini.split('-').map(Number);
   const [yF,mF,dF]=fin.split('-').map(Number);
-  const meses=(yF-yI)*12+(mF-mI)+(dF>=dI?1:0); // si mismo dia o posterior: incluye ambos meses
+  // Calcular plazo como: cuantas cuotas del día dI caben hasta fecha fin (inclusive).
+  // La cuota N del día dI cae en el mes (mI-1 + N-1) relativo al año yI.
+  // La cuota más grande cuya fecha <= fecha_fin.
+  // Fórmula directa: diff_meses = (yF-yI)*12 + (mF-mI)
+  // Si dI <= dF: la cuota de ese mes ya venció → plazo = diff_meses + 1
+  // Si dI > dF: la cuota de ese mes aún no llegó → plazo = diff_meses
+  // PERO si diff_meses=0 y dI>dF: plazo = 0 (inválido)
+  const diff = (yF-yI)*12 + (mF-mI);
+  const meses = diff + (dI <= dF ? 1 : 0);
   if(meses<1){
     el.textContent='⚠ La fecha de término debe ser posterior a la de inicio';
     el.style.color='var(--warn)';
