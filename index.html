@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Calculadora de Amortización</title>
+<title>Finanzas Personales — Simulador y Calculadora de Préstamos</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -219,11 +219,16 @@ header p { font-size: 13px; color: var(--text2); margin-top: 4px; }
 
   /* Ocultar todo excepto la zona de impresión */
   .steps, .btn-row, .tab-bar, #modal-print,
+  #pantalla-inicio, #modulo-calculadora-header,
   #sec1, #sec2,
   .alert.info { display: none !important; }
 
-  /* Mostrar solo la sección 3 */
+  /* Módulo 2: mostrar solo la sección 3 */
   #sec3 { display: block !important; }
+
+  /* Módulo 1: impresión del simulador */
+  #sim-crono-scroll { max-height:none !important; overflow:visible !important; border:none !important; }
+  #sim-resultados { display: block !important; }
   #sec3 .card { box-shadow: none !important; border: none !important; padding: 0 !important; }
   .card-title { font-size: 14px; border-bottom: 1.5px solid #333; padding-bottom: 6px; margin-bottom: 12px; }
 
@@ -300,15 +305,165 @@ header p { font-size: 13px; color: var(--text2); margin-top: 4px; }
   #comparativo-content table { width: 100%; font-size: 10px; }
   #comparativo-content td, #comparativo-content th { padding: 3px 6px !important; }
 }
+
+/* ══ SIMULADOR ═════════════════════════════════════════════════ */
+#sim-currency { cursor:pointer; }
+.sim-modo-badge {
+  display:inline-block; padding:2px 8px; border-radius:10px;
+  font-size:10px; font-weight:600; background:var(--accent-light);
+  color:var(--accent); margin-left:8px; vertical-align:middle;
+}
 </style>
 </head>
 <body>
 <div class="app">
 
-  <header>
-    <h1>Calculadora de Amortización</h1>
-    <p>Sistema francés · Amortización extraordinaria · Optimizador de cuota y plazo</p>
-  </header>
+  <!-- ══ PANTALLA INICIO ══════════════════════════════════════ -->
+  <div id="pantalla-inicio">
+    <header style="text-align:center;margin-bottom:32px">
+      <h1 style="font-size:26px;font-weight:700;letter-spacing:-0.5px">📊 Finanzas Personales</h1>
+      <p style="font-size:14px;color:var(--text2);margin-top:6px">Herramientas de préstamos · Sistema francés · Base 360 días · Días reales</p>
+    </header>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:780px;margin:0 auto">
+      <div class="card" style="cursor:pointer;transition:box-shadow .2s,border-color .2s;border:2px solid var(--border)" onclick="irModulo('simulador')"
+           onmouseover="this.style.borderColor='var(--accent)';this.style.boxShadow='var(--shadow-md)'"
+           onmouseout="this.style.borderColor='var(--border)';this.style.boxShadow='var(--shadow)'">
+        <div style="font-size:36px;margin-bottom:12px">🧮</div>
+        <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:8px">Simulador de Préstamo</div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.6">
+          Ingresa capital, tasa y plazo para generar el cronograma de pagos completo con días reales.
+          Exporta a PDF o Excel. Luego puedes analizar escenarios de amortización.
+        </div>
+        <div style="margin-top:16px">
+          <span style="display:inline-block;background:var(--accent);color:white;border-radius:6px;padding:7px 18px;font-size:13px;font-weight:500">Simular →</span>
+        </div>
+      </div>
+      <div class="card" style="cursor:pointer;transition:box-shadow .2s,border-color .2s;border:2px solid var(--border)" onclick="irModulo('calculadora')"
+           onmouseover="this.style.borderColor='var(--accent)';this.style.boxShadow='var(--shadow-md)'"
+           onmouseout="this.style.borderColor='var(--border)';this.style.boxShadow='var(--shadow)'">
+        <div style="font-size:36px;margin-bottom:12px">⚡</div>
+        <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:8px">Calculadora de Amortización</div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.6">
+          Ya tienes el cronograma de tu banco. Calcula el ahorro de amortizar capital extra:
+          reducir tiempo, bajar cuota, o ambos. Incluye optimizador automático.
+        </div>
+        <div style="margin-top:16px">
+          <span style="display:inline-block;background:var(--accent);color:white;border-radius:6px;padding:7px 18px;font-size:13px;font-weight:500">Calcular →</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ MÓDULO 1: SIMULADOR ═══════════════════════════════════ -->
+  <div id="modulo-simulador" style="display:none">
+    <header style="margin-bottom:20px;display:flex;align-items:center;gap:12px">
+      <button onclick="volverInicio()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;color:var(--text2)">← Inicio</button>
+      <div>
+        <h1 style="font-size:20px;font-weight:700">🧮 Simulador de Préstamo</h1>
+        <p style="font-size:12px;color:var(--text2)">Genera el cronograma completo · Días reales · Sistema francés peruano</p>
+      </div>
+    </header>
+
+    <div class="card">
+      <div class="card-title"><span>1</span> Datos del préstamo a simular</div>
+      <div class="form-grid three" style="margin-bottom:14px">
+        <div class="field">
+          <label>Moneda</label>
+          <select id="sim-currency" style="height:38px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 10px;font-size:13px;font-family:inherit;background:var(--surface);color:var(--text);width:100%">
+            <option value="PEN ">PEN — Soles</option>
+            <option value="USD ">USD — Dólares</option>
+            <option value="EUR ">EUR — Euros</option>
+          </select>
+        </div>
+        <div class="field field-prefix">
+          <label>Capital del préstamo <span style="color:var(--warn)">*</span></label>
+          <span class="prefix" id="sim-pfx1">S/</span>
+          <input type="number" id="sim-capital" placeholder="100000" min="1" step="0.01">
+        </div>
+        <div class="field">
+          <label>Plazo <span style="color:var(--warn)">*</span></label>
+          <input type="number" id="sim-plazo" placeholder="60" min="1" max="600">
+          <div class="hint">Número de cuotas mensuales</div>
+        </div>
+      </div>
+      <div class="form-grid three" style="margin-bottom:14px">
+        <div class="field">
+          <label>TEA — Tasa Efectiva Anual (%) <span style="color:var(--warn)">*</span></label>
+          <input type="number" id="sim-tea" placeholder="9.90" min="0.01" max="200" step="0.01">
+          <div class="hint">Ej: 9.90 para 9.90%</div>
+        </div>
+        <div class="field">
+          <label>% Seguro desgravamen anual <span style="color:var(--text3);font-weight:400">(opcional)</span></label>
+          <input type="number" id="sim-ts" placeholder="1.26" min="0" max="20" step="0.001">
+          <div class="hint">Tasa anual expresada por el banco. Ej: 1.26 → 0.105%/mes</div>
+        </div>
+        <div class="field">
+          <label>Comisión mensual fija <span style="color:var(--text3);font-weight:400">(opcional)</span></label>
+          <input type="number" id="sim-comision" placeholder="0" min="0" step="0.01">
+          <div class="hint">Monto fijo que se suma a cada cuota</div>
+        </div>
+      </div>
+      <div class="form-grid" style="margin-bottom:14px">
+        <div class="field">
+          <label>Fecha de desembolso <span style="color:var(--text3);font-weight:400">(opcional)</span></label>
+          <input type="date" id="sim-desembolso" onchange="simOnFechaChange()">
+          <div class="hint">Si se ingresa junto con la fecha de 1ª cuota, calcula días de gracia</div>
+        </div>
+        <div class="field">
+          <label>Fecha de la primera cuota <span style="color:var(--text3);font-weight:400">(opcional)</span></label>
+          <input type="date" id="sim-fecha-primera" onchange="simOnFechaChange()">
+          <div class="hint">Activa cálculo por días reales (más preciso)</div>
+        </div>
+      </div>
+      <div id="sim-dias-gracia-label" class="fecha-calculada" style="margin-bottom:10px"></div>
+      <div id="sim-preview" class="alert info hidden"></div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="simCalcular()">Generar cronograma →</button>
+      </div>
+    </div>
+
+    <!-- Resultados del simulador -->
+    <div id="sim-resultados" style="display:none">
+      <div class="card" id="sim-resumen-card">
+        <div class="card-title"><span>2</span> Resumen del préstamo</div>
+        <div id="sim-resumen-grid" class="results-grid"></div>
+        <div id="sim-compare-bar" class="compare-bar" style="margin-top:16px"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title"><span>3</span> Cronograma de pagos</div>
+        <div class="alert info" style="margin-bottom:12px;font-size:11px" id="sim-crono-nota"></div>
+        <div class="crono-scroll" id="sim-crono-scroll">
+          <div class="crono-wrap"><table class="crono-table" id="sim-crono-table"></table></div>
+        </div>
+      </div>
+
+      <div class="btn-row" style="justify-content:space-between;flex-wrap:wrap;gap:10px">
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-secondary" onclick="simReset()">← Modificar datos</button>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-secondary" onclick="simExportExcel()">📊 Exportar Excel</button>
+          <button class="btn btn-primary" onclick="simImprimir()">🖨 Imprimir / PDF</button>
+          <button class="btn btn-primary" style="background:var(--warn)" onclick="simPassToCalculadora()">⚡ Analizar amortizaciones →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ MÓDULO 2: CALCULADORA (encabezado) ═══════════════════ -->
+  <div id="modulo-calculadora-header" style="display:none;margin-bottom:20px">
+    <header style="display:flex;align-items:center;gap:12px">
+      <button onclick="volverInicio()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;color:var(--text2)">← Inicio</button>
+      <div>
+        <h1 style="font-size:20px;font-weight:700">⚡ Calculadora de Amortización</h1>
+        <p style="font-size:12px;color:var(--text2)">Sistema francés · Reducción de tiempo y/o cuota · Optimizador</p>
+      </div>
+    </header>
+  </div>
+
+  <!-- ══ MÓDULO 2: CONTENIDO CALCULADORA (sin cambios) ════════ -->
+  <div id="modulo-calculadora" style="display:none">
 
   <!-- STEPS -->
   <div class="steps" id="steps">
@@ -545,6 +700,8 @@ header p { font-size: 13px; color: var(--text2); margin-top: 4px; }
       <button class="btn btn-primary" onclick="abrirModalImprimir()">🖨 Imprimir / Guardar PDF</button>
     </div>
   </div>
+
+  </div><!-- /modulo-calculadora -->
 
 <!-- ══════════════════════════════════════ MODAL IMPRIMIR -->
 <div id="modal-print" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;align-items:center;justify-content:center;">
@@ -1674,6 +1831,417 @@ function calcularPlazoFechasExact(){
 
 // Init
 document.getElementById('cuota_desde').value = 1;
+
+
+// ════════════════════════════════════════════════════════════════
+// MÓDULO 1 — SIMULADOR DE PRÉSTAMO
+// ════════════════════════════════════════════════════════════════
+
+// Estado del simulador
+let SIM = {
+  capital:0, tea:0, plazo:0, ts:0, comision:0,
+  fecha_desembolso:null, fecha_primera:null,
+  usa_dias_reales:false, dias_gracia:0, dt_c1:0,
+  currency:'PEN ', sym:'S/'
+};
+
+// ─── Navegación entre módulos ────────────────────────────────
+function irModulo(nombre){
+  document.getElementById('pantalla-inicio').style.display='none';
+  if(nombre==='simulador'){
+    document.getElementById('modulo-simulador').style.display='block';
+    document.getElementById('modulo-calculadora-header').style.display='none';
+    document.getElementById('modulo-calculadora').style.display='none';
+  } else {
+    document.getElementById('modulo-simulador').style.display='none';
+    document.getElementById('modulo-calculadora-header').style.display='block';
+    document.getElementById('modulo-calculadora').style.display='block';
+    goStep(1);
+  }
+}
+
+function volverInicio(){
+  document.getElementById('pantalla-inicio').style.display='block';
+  document.getElementById('modulo-simulador').style.display='none';
+  document.getElementById('modulo-calculadora-header').style.display='none';
+  document.getElementById('modulo-calculadora').style.display='none';
+}
+
+// Sync moneda simulador
+document.getElementById('sim-currency').addEventListener('change', function(){
+  SIM.currency=this.value; SIM.sym=this.value.trim();
+  document.getElementById('sim-pfx1').textContent=SIM.sym;
+});
+
+// ─── Fechas del simulador ────────────────────────────────────
+function simOnFechaChange(){
+  const vD=document.getElementById('sim-desembolso').value;
+  const vP=document.getElementById('sim-fecha-primera').value;
+  const el=document.getElementById('sim-dias-gracia-label');
+
+  if(!vD && !vP){ el.textContent=''; return; }
+
+  let fdp=null, fpr=null;
+  if(vP){ const [y,m,d]=vP.split('-').map(Number); fpr=new Date(y,m-1,d); }
+  if(vD){ const [y,m,d]=vD.split('-').map(Number); fdp=new Date(y,m-1,d); }
+
+  if(fpr && !fdp){
+    el.textContent='Días reales activados · 1ª cuota: '+formatFecha(fpr);
+    el.style.color='var(--accent)';
+    return;
+  }
+  if(fdp && fpr){
+    const f_teorica=fechaPreviaACuota1(fpr);
+    const dias_g=Math.max(0,diasEntreFechas(fdp,f_teorica));
+    const dt_total=diasEntreFechas(fdp,fpr);
+    if(dias_g>0){
+      el.textContent=`${dias_g} días de gracia · Período 1ª cuota: ${dt_total} días (${dias_g}d gracia + ${diasEntreFechas(f_teorica,fpr)}d normal) · Capital sin cambio`;
+      el.style.color='var(--warn)';
+    } else {
+      el.textContent=`Días reales activados · Desembolso: ${formatFecha(fdp)} · 1ª cuota: ${formatFecha(fpr)}`;
+      el.style.color='var(--accent)';
+    }
+  }
+}
+
+// ─── Cálculo principal del simulador ─────────────────────────
+function simCalcular(){
+  const cap=parseFloat(document.getElementById('sim-capital').value);
+  const pl=parseInt(document.getElementById('sim-plazo').value);
+  const tea=parseFloat(document.getElementById('sim-tea').value)/100;
+  const ts_anual_pct=parseFloat(document.getElementById('sim-ts').value)||0;
+  const comision=parseFloat(document.getElementById('sim-comision').value)||0;
+
+  if(!cap||cap<=0||!pl||pl<=0||!tea||tea<=0){
+    const el=document.getElementById('sim-preview');
+    el.className='alert warn';
+    el.textContent='Por favor completa capital, plazo y TEA.';
+    el.classList.remove('hidden');
+    return;
+  }
+
+  SIM.capital=cap; SIM.tea=tea; SIM.plazo=pl;
+  // Convertir tasa anual del banco a mensual: ts_mensual = ts_anual / 12
+  SIM.ts=ts_anual_pct/100/12;
+  SIM.ts_anual=ts_anual_pct;
+  SIM.comision=comision;
+  SIM.currency=document.getElementById('sim-currency').value;
+  SIM.sym=SIM.currency.trim();
+
+  // ── Resolver fechas ──────────────────────────────────────────
+  SIM.fecha_primera=null; SIM.fecha_desembolso=null;
+  SIM.usa_dias_reales=false; SIM.dias_gracia=0; SIM.dt_c1=0;
+
+  const vP=document.getElementById('sim-fecha-primera').value;
+  const vD=document.getElementById('sim-desembolso').value;
+  if(vP){
+    const [y,m,d]=vP.split('-').map(Number);
+    SIM.fecha_primera=new Date(y,m-1,d); SIM.usa_dias_reales=true;
+  }
+  if(vD && SIM.fecha_primera){
+    const [y,m,d]=vD.split('-').map(Number); SIM.fecha_desembolso=new Date(y,m-1,d);
+    const f_teorica=fechaPreviaACuota1(SIM.fecha_primera);
+    SIM.dias_gracia=Math.max(0,diasEntreFechas(SIM.fecha_desembolso,f_teorica));
+    SIM.dt_c1=SIM.dias_gracia>0?diasEntreFechas(SIM.fecha_desembolso,SIM.fecha_primera):0;
+  }
+
+  // ── Calcular CUOTA FIJA mediante búsqueda binaria ──────────
+  // La cuota total = cuota_financiera_fija + comision, donde:
+  // cuota_financiera_fija cubre interés + seguro + amortización cada mes.
+  // Se usa búsqueda binaria (igual que nuevaCuotaParaN del módulo 2)
+  // para encontrar el valor que liquida exactamente en pl cuotas.
+  //
+  // Nota: se usa el estado temporal de S.fecha_desembolso porque
+  // dtDeCuota() lo lee del global S. Se guarda y restaura.
+  const _fd_backup = S.fecha_desembolso;
+  const _fp_backup = S.fecha_primera;
+  const _udr_backup = S.usa_dias_reales;
+  S.fecha_desembolso = SIM.fecha_desembolso;
+  S.fecha_primera    = SIM.fecha_primera;
+  S.usa_dias_reales  = SIM.usa_dias_reales;
+  S.cuota_total      = 999999; // valor temporal para hi_max en nuevaCuotaParaN
+
+  // Usar nuevaCuotaParaN con ts del simulador
+  const cf_fija = simCalcCuotaFija(cap, pl, tea, SIM.ts, SIM.fecha_primera, SIM.usa_dias_reales);
+
+  // Restaurar estado global S
+  S.fecha_desembolso = _fd_backup;
+  S.fecha_primera    = _fp_backup;
+  S.usa_dias_reales  = _udr_backup;
+
+  SIM.cuota_financiera = cf_fija;          // cubre int + seg + amort (sin comisión)
+  SIM.cuota_total      = cf_fija + comision; // cuota que paga el cliente
+
+  // ── Construir cronograma ───────────────────────────────────
+  const rows = simBuildCronograma();
+  SIM.rows = rows;
+
+  // ── Totales ────────────────────────────────────────────────
+  let tot_int=0,tot_seg=0,tot_com=0,tot_amort=0,tot_cuota=0;
+  rows.forEach(r=>{ tot_int+=r.int; tot_seg+=r.seg; tot_com+=r.com; tot_amort+=r.amort; tot_cuota+=r.cuota; });
+  SIM.tot_int=tot_int; SIM.tot_seg=tot_seg; SIM.tot_com=tot_com;
+  SIM.tot_amort=tot_amort; SIM.tot_cuota=tot_cuota;
+
+  simRenderResumen();
+  simRenderCronograma(rows);
+
+  document.getElementById('sim-resultados').style.display='block';
+  document.getElementById('sim-preview').classList.add('hidden');
+  setTimeout(()=>document.getElementById('sim-resultados').scrollIntoView({behavior:'smooth'}),100);
+}
+
+// ── Búsqueda binaria para cuota_financiera_fija del simulador ─
+// Encuentra cf tal que: el saldo se liquida en exactamente n cuotas.
+// amort_k = cf - saldo_k*tem_k - saldo_k*ts  (cuota fija, seg variable sobre saldo)
+function simCalcCuotaFija(cap, n, tea, ts, fp, udr){
+  if(cap<=0||n<=0) return 0;
+  // Límite inferior: cuota mínima para cubrir solo interés+seguro del primer período
+  const dt1 = udr&&fp ? dtDeCuota(1,fp) : 30;
+  const tem1 = factorInteres(tea, dt1);
+  const lo_min = cap*(tem1+ts)*1.0001;
+  let lo=lo_min, hi=cap; // hi=capital: cuota máxima posible (pago total en 1 cuota)
+  for(let iter=0;iter<120;iter++){
+    const mid=(lo+hi)/2; let s=cap;
+    for(let i=0;i<n;i++){
+      const dt_i = udr&&fp ? dtDeCuota(i+1,fp) : 30;
+      const tem_i = factorInteres(tea, dt_i);
+      s -= (mid - s*tem_i - s*ts);
+      if(s<0.005){ s=0; break; }
+    }
+    if(s>0.005) lo=mid; else hi=mid;
+  }
+  return (lo+hi)/2;
+}
+
+function simDtN(n){
+  if(SIM.usa_dias_reales && SIM.fecha_primera){
+    if(n===1 && SIM.fecha_desembolso) return diasEntreFechas(SIM.fecha_desembolso,SIM.fecha_primera);
+    return dtDeCuota(n,SIM.fecha_primera);
+  }
+  return 30;
+}
+
+function simBuildCronograma(){
+  const cap=SIM.capital, tea=SIM.tea, ts=SIM.ts, com=SIM.comision, pl=SIM.plazo;
+  // cf = cuota_financiera_fija: cubre interés + seguro + amortización
+  // amort_n = cf - int_n - seg_n  (varía mes a mes porque int y seg bajan)
+  // cuota_cliente = cf + com  (FIJA para todas las cuotas normales)
+  const cf=SIM.cuota_financiera;
+  const cuota_fija=cf+com;  // lo que paga el cliente cada mes (fijo)
+  const limite=pl+20;
+  const rows=[]; let saldo=cap;
+
+  for(let n=1;n<=limite;n++){
+    if(saldo<0.005) break;
+    const dt=simDtN(n);
+    const tem=factorInteres(tea,dt);
+    const int_i=saldo*tem;
+    const seg_i=saldo*ts;
+    // amort = cuota_financiera - interés - seguro (esto varía pero la cuota no)
+    const amort_n=cf-int_i-seg_i;
+    const esUlt=(amort_n>=saldo);
+    let amort_i, cuota_i, sf;
+    if(esUlt){
+      // Última cuota: liquida exactamente el saldo pendiente
+      amort_i=saldo; sf=0;
+      cuota_i=saldo+int_i+seg_i+com; // puede diferir ligeramente de cuota_fija
+    } else {
+      amort_i=amort_n; sf=saldo-amort_i;
+      cuota_i=cuota_fija; // cuota exactamente fija
+    }
+    const fecha=SIM.usa_dias_reales&&SIM.fecha_primera?fechaCuotaN(SIM.fecha_primera,n):null;
+    rows.push({n,fecha,dt,saldo_ini:saldo,int:int_i,seg:seg_i,com,amort:amort_i,cuota:cuota_i,sf});
+    saldo=Math.max(0,sf);
+    if(esUlt) break;
+  }
+  return rows;
+}
+
+const fmtSIM=(v)=>SIM.sym+Number(v).toLocaleString('es-PE',{minimumFractionDigits:2,maximumFractionDigits:2});
+const fmtNSIM=(v,d=2)=>Number(v).toLocaleString('es-PE',{minimumFractionDigits:d,maximumFractionDigits:d});
+
+function simRenderResumen(){
+  const S=SIM;
+  const cuotaRef=S.rows[0]?.cuota||0;
+  const modoLabel=S.usa_dias_reales?'📅 Días reales':'📐 Mes estándar (30d)';
+  const graciaLabel=S.dias_gracia>0?` · ${S.dias_gracia} días de gracia`:'';
+
+  const metrics=[
+    {label:'Capital prestado',val:fmtSIM(S.capital),sub:'Monto financiado',cls:'',hl:false},
+    {label:'Plazo',val:S.rows.length+' cuotas',sub:S.plazo!==S.rows.length?`(declarado: ${S.plazo})`:'Exacto',cls:'',hl:false},
+    {label:'Cuota mensual aprox.',val:fmtSIM(cuotaRef),sub:'Varía ligeramente según días del mes',cls:'green',hl:true},
+    {label:'Total intereses',val:fmtSIM(S.tot_int),sub:`${((S.tot_int/S.capital)*100).toFixed(1)}% del capital`,cls:'',hl:false},
+    {label:'Total seguro desgravamen',val:S.ts>0?fmtSIM(S.tot_seg):'No aplica',sub:S.ts>0?`${fmtNSIM(S.ts_anual,3)}% anual (${fmtNSIM(S.ts*1200,4)}%/mes)`:'Sin seguro ingresado',cls:'',hl:false},
+    {label:'Total comisiones',val:S.comision>0?fmtSIM(S.tot_com):'No aplica',sub:S.comision>0?`${fmtSIM(S.comision)} × ${S.rows.length} cuotas`:'Sin comisión',cls:'',hl:false},
+    {label:'Costo total del préstamo',val:fmtSIM(S.tot_cuota),sub:`Capital + intereses + seg. + com.`,cls:'',hl:true},
+    {label:'Costo financiero total',val:fmtSIM(S.tot_int+S.tot_seg+S.tot_com),sub:'Intereses + seguro + comisiones',cls:'amber',hl:false},
+  ];
+
+  const grid=document.getElementById('sim-resumen-grid');
+  grid.innerHTML=metrics.map(m=>`
+    <div class="metric ${m.hl?'highlight':''}">
+      <div class="m-label">${m.label}</div>
+      <div class="m-val ${m.cls||''}">${m.val}</div>
+      <div class="m-sub">${m.sub}</div>
+    </div>`).join('');
+
+  // Barra comparativa
+  const bar=document.getElementById('sim-compare-bar');
+  const maxV=S.tot_cuota;
+  bar.innerHTML=`
+    <div style="font-size:12px;font-weight:600;color:var(--text2);margin-bottom:10px">Composición del costo total</div>
+    ${barRow('Capital', S.capital, maxV,'blue')}
+    ${barRow('Intereses', S.tot_int, maxV,'green')}
+    ${S.ts>0?barRow('Seguro', S.tot_seg, maxV,'green'):''}
+    ${S.comision>0?barRow('Comisiones', S.tot_com, maxV,'green'):''}`;
+
+  // Nota modo
+  document.getElementById('sim-crono-nota').innerHTML=
+    `<strong>${modoLabel}</strong>${graciaLabel} · TEA: ${(S.tea*100).toFixed(2)}% · `+
+    `${S.ts>0?'Seguro: '+fmtNSIM(S.ts_anual,3)+'%/año ('+fmtNSIM(S.ts*1200,4)+'%/mes) · ':'Sin seguro · '}`+
+    `${S.comision>0?'Comisión fija: '+fmtSIM(S.comision)+' · ':''}`+
+    `Todas las cuotas ≤ ${fmtSIM(S.rows.reduce((a,r)=>Math.max(a,r.cuota),0))}`;
+}
+
+function simRenderCronograma(rows){
+  const tieneFechas=SIM.usa_dias_reales&&SIM.fecha_primera;
+  const tieneSeg=SIM.ts>0, tieneCom=SIM.comision>0;
+  const table=document.getElementById('sim-crono-table');
+
+  let thExtra=tieneFechas?'<th>Fecha</th><th>Días</th>':'';
+  let thSeg=tieneSeg?'<th>Seguro</th>':'';
+  let thCom=tieneCom?'<th>Comisión</th>':'';
+  const thead=`<thead><tr>
+    <th>N°</th>${thExtra}
+    <th style="text-align:left">Saldo inicial</th>
+    <th>Amortización</th>
+    <th>Interés</th>
+    ${thSeg}${thCom}
+    <th>Cuota total</th>
+    <th>Saldo final</th>
+  </tr></thead>`;
+
+  let tbody='<tbody>';
+  let ti=0,ts=0,tc=0,ta=0,tq=0;
+  rows.forEach(r=>{
+    ti+=r.int;ts+=r.seg;tc+=r.com;ta+=r.amort;tq+=r.cuota;
+    let tdFechas=tieneFechas
+      ?`<td style="font-size:11px;white-space:nowrap">${formatFecha(r.fecha)}</td><td style="font-size:11px">${r.dt}</td>`:'';
+    tbody+=`<tr>
+      <td>${r.n}</td>${tdFechas}
+      <td style="text-align:left">${fmtSIM(r.saldo_ini)}</td>
+      <td>${fmtSIM(r.amort)}</td>
+      <td>${fmtSIM(r.int)}</td>
+      ${tieneSeg?`<td>${fmtSIM(r.seg)}</td>`:''}
+      ${tieneCom?`<td>${fmtSIM(r.com)}</td>`:''}
+      <td class="green">${fmtSIM(r.cuota)}</td>
+      <td>${fmtSIM(r.sf)}</td>
+    </tr>`;
+  });
+  tbody+='</tbody>';
+
+  let tfExtra=tieneFechas?'<td></td><td></td>':'';
+  let tfSeg=tieneSeg?`<td>${fmtSIM(ts)}</td>`:'';
+  let tfCom=tieneCom?`<td>${fmtSIM(tc)}</td>`:'';
+  const tfoot=`<tfoot><tr>
+    <td>Total</td>${tfExtra}<td></td>
+    <td>${fmtSIM(ta)}</td><td>${fmtSIM(ti)}</td>
+    ${tfSeg}${tfCom}
+    <td>${fmtSIM(tq)}</td><td></td>
+  </tr></tfoot>`;
+
+  table.innerHTML=thead+tbody+tfoot;
+}
+
+function simReset(){
+  document.getElementById('sim-resultados').style.display='none';
+  document.getElementById('sim-preview').classList.add('hidden');
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+// ─── Exportar Excel ─────────────────────────────────────────
+function simExportExcel(){
+  const rows=SIM.rows; if(!rows||!rows.length){ alert('Primero genera el cronograma.'); return; }
+  const tieneFechas=SIM.usa_dias_reales&&SIM.fecha_primera;
+  const tieneSeg=SIM.ts>0, tieneCom=SIM.comision>0;
+  const sym=SIM.sym;
+
+  let cabecera=['N','Saldo inicial','Amortizacion','Interes'];
+  if(tieneFechas){ cabecera.splice(1,0,'Fecha','Dias'); }
+  if(tieneSeg)   cabecera.push('Seguro');
+  if(tieneCom)   cabecera.push('Comision');
+  cabecera.push('Cuota total','Saldo final');
+  let csv=cabecera.join(';')+'\n';
+
+  rows.forEach(r=>{
+    const f=tieneFechas&&r.fecha?r.fecha.toLocaleDateString('es-PE'):'';
+    const dt=tieneFechas?r.dt:'';
+    csv+=r.n+';'+(tieneFechas?f+';'+dt+';':'')+
+      r.saldo_ini.toFixed(2)+';'+r.amort.toFixed(2)+';'+r.int.toFixed(2)+';'+
+      (tieneSeg?r.seg.toFixed(2)+';':'')+(tieneCom?r.com.toFixed(2)+';':'')+
+      r.cuota.toFixed(2)+';'+r.sf.toFixed(2)+'\n';
+  });
+
+  // Fila totales
+  csv+='Total;'+(tieneFechas?';;':'');
+  csv+=';'+SIM.tot_amort.toFixed(2)+';'+SIM.tot_int.toFixed(2)+';';
+  if(tieneSeg) csv+=SIM.tot_seg.toFixed(2)+';';
+  if(tieneCom) csv+=SIM.tot_com.toFixed(2)+';';
+  csv+=SIM.tot_cuota.toFixed(2)+'\n';
+
+  const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download=`cronograma_prestamo_${SIM.capital}_${SIM.plazo}m.csv`;
+  a.click();
+}
+
+// ─── Imprimir simulador ─────────────────────────────────────
+function simImprimir(){
+  // Agregar clase print-include a las secciones del simulador
+  document.querySelectorAll('.tab-content').forEach(el=>el.classList.remove('print-include'));
+  // El simulador tiene su propio layout — simplemente imprimimos todo el módulo
+  const style=document.createElement('style');
+  style.id='sim-print-override';
+  style.textContent=`
+    @media print {
+      #pantalla-inicio,#modulo-calculadora-header,#modulo-calculadora,#modal-print,
+      #sec1,#sec2,#sec3,.btn-row,.tab-bar,.steps { display:none !important; }
+      #modulo-simulador { display:block !important; }
+      #sim-crono-scroll { max-height:none !important; overflow:visible !important; border:none !important; }
+      .crono-table thead { display:table-header-group; }
+      .crono-table tr { page-break-inside:avoid; }
+    }`;
+  document.head.appendChild(style);
+  window.print();
+  setTimeout(()=>{ const s=document.getElementById('sim-print-override'); if(s) s.remove(); },800);
+}
+
+// ─── Pasar datos al módulo 2 ────────────────────────────────
+function simPassToCalculadora(){
+  if(!SIM.rows||!SIM.rows.length){ alert('Primero genera el cronograma.'); return; }
+  // Pre-cargar los campos del módulo 2 con los datos del simulador
+  document.getElementById('currency').value=SIM.currency;
+  document.getElementById('capital').value=SIM.capital;
+  document.getElementById('tea').value=(SIM.tea*100).toFixed(4);
+  document.getElementById('plazo').value=SIM.rows.length; // cuotas reales
+  document.getElementById('cuota_total').value=SIM.rows[0]?.cuota.toFixed(2)||'';
+  document.getElementById('seguro_total').value=SIM.tot_seg>0?SIM.tot_seg.toFixed(2):'';
+  document.getElementById('intereses_orig').value=SIM.tot_int.toFixed(2);
+  document.getElementById('cuota_desde').value=1;
+
+  // Fecha primera cuota
+  if(SIM.fecha_primera){
+    const fp=SIM.fecha_primera;
+    const yy=fp.getFullYear(), mm=String(fp.getMonth()+1).padStart(2,'0'), dd=String(fp.getDate()).padStart(2,'0');
+    document.getElementById('fecha_primera_cuota').value=`${yy}-${mm}-${dd}`;
+    switchPlazo('meses');
+  }
+
+  // Activar la calculadora
+  irModulo('calculadora');
+  // Disparar validate automáticamente
+  setTimeout(()=>{ validateStep1(); }, 300);
+}
 
 // ════════════════════════════════════════════════════════════════
 // MODAL DE IMPRESIÓN
