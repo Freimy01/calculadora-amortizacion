@@ -2039,12 +2039,13 @@ function simBuildCronograma(){
     const seg_i=saldo*ts;
     // amort = cuota_financiera - interés - seguro (esto varía pero la cuota no)
     const amort_n=cf-int_i-seg_i;
-    const esUlt=(amort_n>=saldo);
+    // Es última si: la amortización cubre todo el saldo, O llegamos al plazo declarado
+    const esUlt=(amort_n>=saldo)||(n===pl);
     let amort_i, cuota_i, sf;
     if(esUlt){
       // Última cuota: liquida exactamente el saldo pendiente
       amort_i=saldo; sf=0;
-      cuota_i=saldo+int_i+seg_i+com; // puede diferir ligeramente de cuota_fija
+      cuota_i=round2(saldo+int_i+seg_i+com); // puede diferir ligeramente de cuota_fija
     } else {
       amort_i=amort_n; sf=saldo-amort_i;
       cuota_i=cuota_fija; // cuota exactamente fija
